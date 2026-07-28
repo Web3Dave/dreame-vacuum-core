@@ -93,7 +93,9 @@ def device_display_name(record: dict) -> str:
 class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Owns the device connection, state and profile."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, profile: DeviceProfile | None = None
+    ) -> None:
         self.entry = entry
         # Options override data so the companion settings (host/port/token/PIN)
         # stay editable after setup without re-adding the integration.
@@ -102,7 +104,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.model: str = cfg.get(CONF_MODEL) or "unknown"
         self.device_name: str = cfg.get(CONF_NAME) or self.model
 
-        self.profile: DeviceProfile = load_profile(self.model)
+        # Passed in by async_setup_entry, which loads it in the executor -
+        # load_profile reads JSON off disk and must not run on the event loop.
+        self.profile: DeviceProfile = profile or load_profile(self.model)
         self._protocol: DreameVacuumProtocol | None = None
 
         # Robot pose, decoded from map frames. Kept out of `data` because map

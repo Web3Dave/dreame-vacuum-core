@@ -64,19 +64,10 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         | VacuumEntityFeature.STOP
         | VacuumEntityFeature.RETURN_HOME
         | VacuumEntityFeature.LOCATE
-        | VacuumEntityFeature.BATTERY
     )
 
     def __init__(self, coordinator: DreameCoordinator) -> None:
         super().__init__(coordinator, "vacuum")
-
-    @property
-    def battery_level(self) -> int | None:
-        value = self.coordinator.value("Battery", "PropBatteryLevel")
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
 
     @property
     def activity(self) -> VacuumActivity | None:

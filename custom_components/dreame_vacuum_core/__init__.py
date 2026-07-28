@@ -7,8 +7,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import CONF_MODEL, DOMAIN
 from .coordinator import DreameCoordinator
+from .profile import load_profile
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +23,10 @@ PLATFORMS: list[Platform] = [
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    coordinator = DreameCoordinator(hass, entry)
+    model = {**entry.data, **entry.options}.get(CONF_MODEL) or "unknown"
+    profile = await hass.async_add_executor_job(load_profile, model)
+
+    coordinator = DreameCoordinator(hass, entry, profile)
     await coordinator.async_setup()
     await coordinator.async_config_entry_first_refresh()
 

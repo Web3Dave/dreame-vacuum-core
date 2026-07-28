@@ -25,6 +25,24 @@ class CompanionClient:
         self._warned = False
 
     async def _post(self, path: str, body: dict, timeout: int = 45) -> dict | None:
+        # One retry on a dropped connection. HA's shared aiohttp session pools
+        # connections, and a pooled one can be closed by the server before we
+        # reuse it - which surfaces as ServerDisconnectedError before the
+        # request is ever sent. Retrying is safe: /stream/start returns the
+        # existing stream if one is running, and /stream/stop is idempotent.
+        try:
+            return await self._post_once(path, body, timeout)
+        except aiohttp.ServerDisconnectedError:
+            _LOGGER.debug("Connection to the add-on was dropped, retrying %s", path)
+        try:
+            return await self._post_once(path, body, timeout)
+        except aiohttp.ServerDisconnectedError as err:
+            if not self._warned:
+                _LOGGER.warning("Companion add-on dropped the connection twice: %s", err)
+                self._warned = True
+            return None
+
+    async def _post_once(self, path: str, body: dict, timeout: int) -> dict | None:
         try:
             async with self._session.post(
                 f"{self._base}{path}",
@@ -40,6 +58,10 @@ class CompanionClient:
                     return None
                 self._warned = False
                 return await resp.json()
+        except aiohttp.ServerDisconnectedError:
+            # Handled by _post's retry. Caught explicitly because it subclasses
+            # ClientError and would otherwise be swallowed below.
+            raise
         except (aiohttp.ClientError, TimeoutError) as err:
             if not self._warned:
                 _LOGGER.warning("Companion add-on unreachable at %s: %s", self._base, err)

@@ -168,7 +168,7 @@ class DreameVacuumCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         model = self._chosen.get("model") or ""
-        profile = load_profile(model)
+        profile = await self.hass.async_add_executor_job(load_profile, model)
         schema = vol.Schema(
             {
                 vol.Optional(CONF_COMPANION_HOST, default="localhost"): str,
