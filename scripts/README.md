@@ -116,3 +116,16 @@ python scripts/dump_properties.py --diff before.json during.json
 
 Snapshots contain device state, not credentials, but they do identify the
 device - keep them out of the repo.
+
+## rotate_experiment.py
+
+Runs the same 40 degree turn twice - once plain, once with a monitor session
+open - snapshotting properties around each, to establish whether an open
+camera session is what stops the robot vacuuming as it turns.
+
+```
+python scripts/rotate_experiment.py --did <device id>
+```
+
+Reads credentials from `.env` in the repo root (DREAME_USERNAME,
+DREAME_PASSWORD, VIDEO_STREAM_PIN). Put the robot in open space first.
