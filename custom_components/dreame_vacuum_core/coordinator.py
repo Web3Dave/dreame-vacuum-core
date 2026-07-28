@@ -35,6 +35,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from datetime import timedelta
 
+from .camera_session import CameraSession
 from .companion import CompanionClient
 from .const import (
     CONF_CAMERA_PIN,
@@ -83,6 +84,10 @@ REMOTE_REFRESH_SECONDS = 1.0
 # Commands shorter than this are too brief for the device to act on cleanly,
 # so small corrections turn slower rather than for an unusably short time.
 MIN_TURN_SECONDS = 0.6
+
+# How long to let a camera session settle before moving. Measured by hand:
+# turns became silent at about three seconds.
+CAMERA_SETTLE_SECONDS = 3.5
 
 # Lowest settings the device offers. Driving under remote control is a
 # cleaning mode as far as the firmware is concerned - Dreame document it as
@@ -177,6 +182,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_change = time.time()
         self._last_failure: float | None = None
         self._keep_alive_cancel = None
+        self._warned_no_pin = False
 
         self.companion: CompanionClient | None = None
         if cfg.get(CONF_ENABLE_CAMERA) and cfg.get(CONF_COMPANION_TOKEN):
@@ -786,13 +792,49 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Enable debug logging for dreame_vacuum_core for the details."
             )
 
-        previous = await self._async_quieten() if quiet else {}
+        # A camera session stops the firmware promoting the drive into a
+        # remote-control cleaning task, which is what runs the brushes.
+        camera = await self._async_open_camera_session()
+        previous = await self._async_quieten() if quiet and not camera else {}
         try:
-            await self._async_rotate_loop(heading, current, tolerance, max_attempts, damping, settle)
+            await self._async_rotate_loop(
+                heading, current, tolerance, max_attempts, damping, settle, camera
+            )
         finally:
             # Restore even if the rotation raised, or a failed turn would
             # silently leave the vacuum on its quietest setting.
             await self._async_restore(previous)
+            if camera:
+                await self.hass.async_add_executor_job(camera.stop)
+
+    async def _async_open_camera_session(self) -> CameraSession | None:
+        """Open a video-less camera session, or None if we cannot.
+
+        Optional on purpose: the PIN is only configured when the camera is set
+        up, and a vacuum without it should still be able to turn - noisily.
+        """
+        pin = (self.config.get(CONF_CAMERA_PIN) or "").strip()
+        if not pin:
+            if not self._warned_no_pin:
+                _LOGGER.warning(
+                    "No camera PIN configured for %s, so rotation will run the brushes. "
+                    "Add the PIN in the integration options for a quiet turn",
+                    self.device_name,
+                )
+                self._warned_no_pin = True
+            return None
+
+        session = CameraSession(self._protocol, self.did, pin)
+        try:
+            started = await self.hass.async_add_executor_job(session.start)
+        except Exception as err:  # noqa: BLE001 - a noisy turn beats no turn
+            _LOGGER.warning("Could not open a camera session for %s: %s", self.device_name, err)
+            return None
+        if not started:
+            return None
+
+        await asyncio.sleep(CAMERA_SETTLE_SECONDS)
+        return session
 
     async def _async_rotate_loop(
         self,
@@ -802,8 +844,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         max_attempts: int,
         damping: float,
         settle: float,
+        camera: CameraSession | None = None,
     ) -> None:
         for _ in range(int(max_attempts)):
+            if camera:
+                await self.hass.async_add_executor_job(camera.keep_alive)
             # Shortest signed turn, so it never takes the long way round.
             diff = (heading - current) % 360
             if diff > 180:
