@@ -119,9 +119,9 @@ device - keep them out of the repo.
 
 ## rotate_experiment.py
 
-Runs the same 40 degree turn twice - once plain, once with a monitor session
-open - snapshotting properties around each, to establish whether an open
-camera session is what stops the robot vacuuming as it turns.
+Runs the identical turn three times, changing one thing at a time: plain,
+then with a live view session open, then with the session open and suction
+and water at their minimum. Suction and water are restored afterwards.
 
 ```
 # fast, observational: two 180 degree turns, waits for you before each

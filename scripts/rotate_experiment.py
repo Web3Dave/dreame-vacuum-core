@@ -1,10 +1,15 @@
 """Does an open camera/monitor session stop the robot vacuuming while it turns?
 
 Driving from the app's live view turns without running the brushes; the same
-command sent any other way vacuums as it goes. This runs the same rotation
-twice - once plain, once with a monitor session open - and snapshots the
-device's properties around each, so the difference shows up as data rather
-than as a guess.
+command sent any other way vacuums as it goes. This runs the identical
+rotation three times, changing one thing at a time:
+
+    1. plain - no live view, suction as-is
+    2. live view session open, suction as-is
+    3. live view session open, suction and water at their minimum
+
+Suction and water are restored afterwards. Snapshots of every property are
+taken around each turn unless --no-snapshots is given.
 
     python scripts/rotate_experiment.py --did 2089953038
 
@@ -34,6 +39,12 @@ from dump_properties import collect, diff  # noqa: E402
 TURN_RATE_DPS = 45
 REFRESH_SECONDS = 1.0
 SIID_VACUUM_EXTEND, PIID_REMOTE_STATE = 4, 15
+
+# Despite the generated names, piid 4 is the suction level (0 quiet .. 3
+# turbo) and piid 5 is the water volume (1 low .. 3 high). Neither can be
+# switched off - the firmware treats remote driving as a cleaning mode.
+PIID_SUCTION, SUCTION_QUIET = 4, 0
+PIID_WATER, WATER_LOW = 5, 1
 
 # Camera service, from the app's own plugin bundle.
 SIID_MONITOR = 10001
@@ -172,6 +183,17 @@ def stop_live_view(protocol, did: str, session: str) -> None:
                   {"operType": "monitor", "operation": "end", "session": session})
 
 
+def read_prop(protocol, did: str, piid: int):
+    result = protocol.get_properties([{"did": did, "siid": SIID_VACUUM_EXTEND, "piid": piid}])
+    if isinstance(result, list) and result and result[0].get("code") == 0:
+        return result[0].get("value")
+    return None
+
+
+def set_prop(protocol, piid: int, value) -> None:
+    protocol.set_property(SIID_VACUUM_EXTEND, piid, value)
+
+
 def _summarise(resp) -> str:
     if not resp:
         return "no response"
@@ -191,9 +213,6 @@ def main() -> int:
                     help="skip the property dumps - much faster, purely observational")
     ap.add_argument("--pause", action="store_true",
                     help="wait for Enter before each turn so you can be watching")
-    ap.add_argument("--no-live-view", action="store_true",
-                    help="skip opening the live view, so both turns are identical - "
-                         "the control run for whether the session matters at all")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parents[2]
@@ -258,35 +277,49 @@ def main() -> int:
 
     idle = snapshot("1-idle")
 
-    countdown("TURN 1 of 2: no live view session")
+    # --- turn 1: nothing special -------------------------------------
+    countdown("TURN 1 of 3: plain - no live view, normal suction")
     rotate(protocol, args.degrees, hold=args.hold)
     time.sleep(2)
     plain = snapshot("2-after-plain-rotate")
 
-    session = None
-    if args.no_live_view:
-        print("\n--- SKIPPING the live view session (control run)")
-    else:
-        print("\n--- opening a live view session (full app sequence)")
-        session, channel = start_live_view(protocol, args.did, pin)
-        time.sleep(3)
-    monitoring = snapshot("3-monitor-open")
+    # --- turn 2: live view open, suction untouched --------------------
+    print("\n--- opening a live view session (full app sequence)")
+    session, channel = start_live_view(protocol, args.did, pin)
+    time.sleep(3)
+    monitoring = snapshot("3-live-view-open")
 
-    if session:
-        camera_keep_alive(protocol, args.did, session)
-    countdown(
-        "TURN 2 of 2: live view session OPEN" if session
-        else "TURN 2 of 2: still no live view (control)"
-    )
+    camera_keep_alive(protocol, args.did, session)
+    countdown("TURN 2 of 3: live view OPEN, normal suction")
     rotate(protocol, args.degrees, hold=args.hold)
-    if session:
-        camera_keep_alive(protocol, args.did, session)
+    camera_keep_alive(protocol, args.did, session)
     time.sleep(2)
-    snapshot("4-after-monitor-rotate")
+    snapshot("4-after-live-view-rotate")
 
-    if session:
-        print("\n--- closing the live view session")
-        stop_live_view(protocol, args.did, session)
+    # --- turn 3: live view open, suction and water at minimum ---------
+    suction = read_prop(protocol, args.did, PIID_SUCTION)
+    water = read_prop(protocol, args.did, PIID_WATER)
+    print(f"\n--- turning suction {suction} -> {SUCTION_QUIET}, water {water} -> {WATER_LOW}")
+    set_prop(protocol, PIID_SUCTION, SUCTION_QUIET)
+    set_prop(protocol, PIID_WATER, WATER_LOW)
+    time.sleep(2)
+
+    camera_keep_alive(protocol, args.did, session)
+    countdown("TURN 3 of 3: live view OPEN, suction and water at minimum")
+    rotate(protocol, args.degrees, hold=args.hold)
+    camera_keep_alive(protocol, args.did, session)
+    time.sleep(2)
+    snapshot("5-after-quiet-rotate")
+
+    # Put the settings back regardless of what happened above.
+    if suction is not None:
+        set_prop(protocol, PIID_SUCTION, suction)
+    if water is not None:
+        set_prop(protocol, PIID_WATER, water)
+    print(f"--- restored suction {suction}, water {water}")
+
+    print("\n--- closing the live view session")
+    stop_live_view(protocol, args.did, session)
 
     print("\n" + "=" * 60)
     print("IDLE vs LIVE VIEW OPEN - what the session changes:")
