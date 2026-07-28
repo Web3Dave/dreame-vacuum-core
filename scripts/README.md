@@ -140,3 +140,13 @@ PYTHONPATH=../dreame-vacuum-companion/dreame_vacuum_companion python scripts/...
 
 Reads credentials from `.env` in the repo root (DREAME_USERNAME,
 DREAME_PASSWORD, VIDEO_STREAM_PIN). Put the robot in open space first.
+
+## live_view_diff.py
+
+Snapshots every property, opens a live view session, waits, snapshots again
+and diffs - without moving the robot. Written to find a property that could
+be set directly instead of holding a session open.
+
+```
+python scripts/live_view_diff.py --did <device id> --delay 5
+```

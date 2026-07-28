@@ -229,6 +229,7 @@ def main() -> int:
         return 1
 
     outdir = Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
     protocol_cls = _load_protocol()
     protocol = protocol_cls(
         username=username, password=password, country=args.country,
