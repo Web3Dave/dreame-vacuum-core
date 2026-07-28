@@ -165,6 +165,15 @@ def main() -> int:
         return 1
     protocol.cloud._did = args.did
 
+    # connect() is what resolves the device's routing details; without it
+    # every command 404s at the cloud's sendCommand endpoint. The integration
+    # does the same thing before issuing anything.
+    protocol.connect(lambda _message: None)
+    if not protocol.connected:
+        print("Connected to the cloud but not to the device", file=sys.stderr)
+        return 1
+    print("Connected to the device", file=sys.stderr)
+
     def snapshot(name: str) -> dict:
         print(f"\n--- snapshot: {name}")
         data = collect(protocol, args.did)
