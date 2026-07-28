@@ -1,0 +1,5 @@
+# Models to build profiles for. One id per line, # for comments.
+# Not every model has a published resource package - see README.
+dreame.vacuum.r2579h
+dreame.vacuum.r2338a
+dreame.vacuum.r2205

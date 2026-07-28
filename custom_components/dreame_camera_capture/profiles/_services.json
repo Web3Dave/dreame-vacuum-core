@@ -1,0 +1,540 @@
+{
+  "_generator": {
+    "source_bundle": "93d67fa85d92992a72294abfede1a483dreame.vacuum.common_1722.zip",
+    "version": 1
+  },
+  "services": {
+    "Antiscalant": {
+      "aiid": {
+        "resetBrushLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropAntiscalantLeftTime": 1,
+        "PropAntiscalantLifeLevel": 2
+      },
+      "service": "Antiscalant",
+      "siid": 31
+    },
+    "Audio": {
+      "aiid": {
+        "playSound": 2,
+        "position": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropBaiduFullLog": 11,
+        "PropDevelopVoiceControlSwitch": 17,
+        "PropDreameGPT": 14,
+        "PropListenLanguageSwitchStatus": 16,
+        "PropListenLanguageType": 10,
+        "PropResponseWord": 12,
+        "PropSetCurrentCity": 7,
+        "PropSetEmptyStamp": 6,
+        "PropSetVoice": 4,
+        "PropSetVoiceAssistant": 5,
+        "PropSupportListenLanguage": 15,
+        "PropVoiceChangeState": 3,
+        "PropVoiceCustomWakeUpByWordSwitch": 21,
+        "PropVoiceCustomWakeUpText": 20,
+        "PropVoiceFullDuplexSwitch": 18,
+        "PropVoiceNoWakeUpSwitch": 19,
+        "PropVoicePacketId": 2,
+        "PropVoiceTest": 9,
+        "PropVolume": 1
+      },
+      "service": "Audio",
+      "siid": 7
+    },
+    "Battery": {
+      "aiid": {
+        "StartCharge": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropBatteryLevel": 1,
+        "PropChargingState": 2,
+        "PropSmartChargeConfig": 3
+      },
+      "service": "Battery",
+      "siid": 3
+    },
+    "CleanLog": {
+      "aiid": {},
+      "piid": {},
+      "piid_symbolic": {
+        "PropCruiseRecordTime": 6,
+        "PropFirstCleanTime": 1,
+        "PropTotalCleanArea": 4,
+        "PropTotalCleanTime": 2,
+        "PropTotalCleanTimes": 3,
+        "PropTotalRecordTimes": 5
+      },
+      "service": "CleanLog",
+      "siid": 12
+    },
+    "CleanMap": {
+      "aiid": {
+        "backupMap": 3,
+        "mapReq": 1,
+        "updateMapInfo": 2,
+        "wifiMap": 4
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropBackupMap": 14,
+        "PropBackupMapInfo": 9,
+        "PropFrameInfo": 2,
+        "PropMapExtendData": 4,
+        "PropMapdata": 1,
+        "PropMultMapInfo": 8,
+        "PropMultMapState": 7,
+        "PropObjectName": 3,
+        "PropOldIMap": 13,
+        "PropRestoreMap": 10,
+        "PropRestoreMapByArr": 16,
+        "PropRestoreMapStatus": 11,
+        "PropResultCode": 6,
+        "PropRobotTime": 5,
+        "PropWifiMap": 15
+      },
+      "service": "CleanMap",
+      "siid": 6
+    },
+    "DND": {
+      "aiid": {
+        "deleteTime": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropDNDAddTaskTime": 4,
+        "PropDNDenable": 1,
+        "PropDNDendTime": 3,
+        "PropDNDstartTime": 2
+      },
+      "service": "DND",
+      "siid": 5
+    },
+    "Debug": {
+      "aiid": {},
+      "piid": {},
+      "piid_symbolic": {
+        "PropBitCheck": 8,
+        "PropFlowingWaterWash": 35,
+        "PropMatterQRCode": 50,
+        "PropSysGurad": 40
+      },
+      "service": "Debug",
+      "siid": 99
+    },
+    "DeodorizingModule": {
+      "aiid": {
+        "resetDeodorizingModuleLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropAddDeodorizingModule": 3,
+        "PropDeodorizingModuleLeftTime": 1,
+        "PropDeodorizingModuleLifeLevel": 2
+      },
+      "service": "DeodorizingModule",
+      "siid": 29
+    },
+    "Detergent": {
+      "aiid": {
+        "resetDetergentLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropDetergentLeftTime": 2,
+        "PropDetergentLifeLevel": 1
+      },
+      "service": "Detergent",
+      "siid": 20
+    },
+    "DirtyTank": {
+      "aiid": {
+        "resetDirtyTankLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropDirtyTankLeftTime": 1,
+        "PropDirtyTankLifeLevel": 2
+      },
+      "service": "DirtyTank",
+      "siid": 26
+    },
+    "Dush": {
+      "aiid": {
+        "startCollect": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropAutoCollect": 1,
+        "PropCleanTimes": 2,
+        "PropDustEnable": 3,
+        "PropDustStatus": 5
+      },
+      "service": "Dush",
+      "siid": 15
+    },
+    "Filter": {
+      "aiid": {
+        "resetFilterLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropFilterLeftTime": 2,
+        "PropFilterLifeLevel": 1
+      },
+      "service": "Filter",
+      "siid": 11
+    },
+    "GeneralProtocol": {
+      "aiid": {},
+      "piid": {},
+      "piid_symbolic": {
+        "PropGeneralProtocolActiveBaseLift": 84,
+        "PropGeneralProtocolAutoBrushScraper": 54,
+        "PropGeneralProtocolAutoLdsUp": 3,
+        "PropGeneralProtocolAutoPressFloor": 53,
+        "PropGeneralProtocolBatteryAbnormal": 110,
+        "PropGeneralProtocolBatteryLevel": 47,
+        "PropGeneralProtocolBowBeforeEdge": 42,
+        "PropGeneralProtocolCarpetAISegment": 37,
+        "PropGeneralProtocolCarpetFirst": 2,
+        "PropGeneralProtocolCleanEfficiency": 9,
+        "PropGeneralProtocolDNDAutoDust": 15,
+        "PropGeneralProtocolDNDBreakPoint": 14,
+        "PropGeneralProtocolDNDLowerVolume": 16,
+        "PropGeneralProtocolDetergentBoxA": 44,
+        "PropGeneralProtocolDetergentBoxB": 45,
+        "PropGeneralProtocolDustBoxBugAutoDry": 48,
+        "PropGeneralProtocolDynamicObstacleClean": 18,
+        "PropGeneralProtocolERPLowPower": 30,
+        "PropGeneralProtocolElenishPeris": 52,
+        "PropGeneralProtocolFanAbnormalNoise": 40,
+        "PropGeneralProtocolFeedbackIssue": 36,
+        "PropGeneralProtocolHairCompression": 28,
+        "PropGeneralProtocolHandVaccumAutoDusting": 17,
+        "PropGeneralProtocolHatchAdjustment": 21,
+        "PropGeneralProtocolHotWaterLevel": 8,
+        "PropGeneralProtocolHotWaterMop": 46,
+        "PropGeneralProtocolHumanNoiseReduction": 19,
+        "PropGeneralProtocolIgnoreStairs": 59,
+        "PropGeneralProtocolInjectPump": 12,
+        "PropGeneralProtocolIntegralEnergy": 81,
+        "PropGeneralProtocolLDSLedKeepOn": 61,
+        "PropGeneralProtocolLargeMemoryReset": 41,
+        "PropGeneralProtocolLdsState": 4,
+        "PropGeneralProtocolLiftLDSFreq": 51,
+        "PropGeneralProtocolMopAfterVacSwitch": 24,
+        "PropGeneralProtocolObsMoveType": 38,
+        "PropGeneralProtocolParticleRealtimeDetect": 58,
+        "PropGeneralProtocolPowerSaving": 63,
+        "PropGeneralProtocolPretentationShow": 79,
+        "PropGeneralProtocolQuickWashMode": 6,
+        "PropGeneralProtocolSbrushWorkCarpet": 29,
+        "PropGeneralProtocolShieldHealth": 23,
+        "PropGeneralProtocolShieldPurgeTankCheck": 31,
+        "PropGeneralProtocolShieldUltrasonicSig": 26,
+        "PropGeneralProtocolSilentDry": 27,
+        "PropGeneralProtocolSmallAreaCleanFast": 25,
+        "PropGeneralProtocolSmartCleanMode": 5,
+        "PropGeneralProtocolSmartWashMop": 22,
+        "PropGeneralProtocolStationAutoWashError": 32,
+        "PropGeneralProtocolSweepDistanceSwitch": 49,
+        "PropGeneralProtocolUserLabelChild": 7,
+        "PropGeneralProtocolUserLabelPet": 20,
+        "PropGeneralProtocolVideoFullInfoUpload": 35,
+        "PropGeneralProtocolVideoObstacleSwitch": 13,
+        "PropGeneralProtocolVisualResumeSwitch": 39,
+        "PropGeneralProtocolVoltage": 43,
+        "PropGeneralProtocolWashTestConfig": 33,
+        "PropGeneralProtocolWaterLevel": 1
+      },
+      "service": "GeneralProtocol",
+      "siid": 28
+    },
+    "GeneralState": {
+      "aiid": {},
+      "piid": {},
+      "piid_symbolic": {
+        "PropGeneralDustBoxBagDryLeftTime": 17,
+        "PropGeneralDustBoxBagDryStatus": 18,
+        "PropGeneralFirstConnectWifi": 12,
+        "PropGeneralHanddustConnectStatus": 14,
+        "PropGeneralHanddustDustStatus": 13,
+        "PropGeneralHotWaterStatus": 15,
+        "PropGeneralStateAddCleanResult": 11,
+        "PropGeneralStateAddCleanState": 10,
+        "PropGeneralStateAiPostDeal": 7,
+        "PropGeneralStateDetergent": 4,
+        "PropGeneralStateDirtyWaterBox": 2,
+        "PropGeneralStateDustBox": 19,
+        "PropGeneralStateDustBug": 3,
+        "PropGeneralStateLdsControlResult": 6,
+        "PropGeneralStateRisingBox": 1,
+        "PropGeneralStateSecondClean": 8,
+        "PropGeneralStateWaterBoxInstall": 9,
+        "PropGeneralStateWaterDrain": 5,
+        "PropGeneralThresholdConfirmStatus": 16,
+        "PropMechanicalFootStatus": 28
+      },
+      "service": "GeneralState",
+      "siid": 27
+    },
+    "MainBrush": {
+      "aiid": {
+        "resetBrushLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropMainBrushLeftTime": 1,
+        "PropMainBrushLifeLevel": 2
+      },
+      "service": "MainBrush",
+      "siid": 9
+    },
+    "Monitor": {
+      "aiid": {
+        "ACCESS_CODE_OPERATE": 4,
+        "CAMERA_OPERATE": 1,
+        "PROPERTY_OPERATE": 3,
+        "VIDEO_VENDOR": 7,
+        "VOICE_OPERATE": 2
+      },
+      "piid": {
+        "GET_PROPERTY": 99,
+        "KEEP_ALIVE": 6,
+        "PERSON_DATA": 110,
+        "TAKE_PHOTO": 5
+      },
+      "piid_symbolic": {
+        "PropGetAccessCode": 1100,
+        "PropMonitor": 1,
+        "PropMonitorAudioStatus": 2,
+        "PropMonitorCameraLightSwitch": 10,
+        "PropMonitorFaults": 7,
+        "PropMonitorRFillinLightSet": 9,
+        "PropMonitorRecordStatus": 4,
+        "PropMonitorRestMode": 1103,
+        "PropMonitorSpace": 2003,
+        "PropMonitorTaskStatus": 103,
+        "PropSetAccessCode": 1101,
+        "PropSetAccessHotStatus": 1104,
+        "PropUploadStatus": 1003,
+        "PropVerifyAccessCode": 1102,
+        "PropVideoObstacleData": 112,
+        "PropVideoObstacleSwitch": 111,
+        "PropVideoVendorStatus": 11
+      },
+      "service": "Monitor",
+      "siid": 10001
+    },
+    "Mop": {
+      "aiid": {
+        "resetMopLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropMopLeftTime": 2,
+        "PropMopLifeLevel": 1
+      },
+      "service": "Mop",
+      "siid": 18
+    },
+    "RobotConfig": {
+      "aiid": {
+        "sendPublicKey": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropMatterNetworkStartup": 6,
+        "PropRobotWithinPlugin": 4,
+        "PropSendPublicKey": 5
+      },
+      "service": "RobotConfig",
+      "siid": 14
+    },
+    "Schedule": {
+      "aiid": {
+        "deletCruiseTimer": 2,
+        "deletetimer": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropCruiseTimer": 5,
+        "PropTimerCancleReson": 4,
+        "PropTimerclean": 2,
+        "PropTimerid": 3,
+        "PropTimezone": 1
+      },
+      "service": "Schedule",
+      "siid": 8
+    },
+    "Sensor": {
+      "aiid": {
+        "resetSensorLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropSensorLeftTime": 2,
+        "PropSensorLifeLevel": 1
+      },
+      "service": "Sensor",
+      "siid": 16
+    },
+    "SideBrush": {
+      "aiid": {
+        "resetBrushLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropSideBrushLeftTime": 1,
+        "PropSideBrushLifeLevel": 2
+      },
+      "service": "SideBrush",
+      "siid": 10
+    },
+    "SilverIon": {
+      "aiid": {
+        "resetSilverIonLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropAddSilverIon": 3,
+        "PropSilverIonLeftTime": 1,
+        "PropSilverIonLifeLevel": 2
+      },
+      "service": "SilverIon",
+      "siid": 19
+    },
+    "Squeegee": {
+      "aiid": {
+        "resetSqueegeeLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropSqueegeeLeftTime": 1,
+        "PropSqueegeeLifeLevel": 2
+      },
+      "service": "Squeegee",
+      "siid": 24
+    },
+    "Sump": {
+      "aiid": {
+        "resetSumpLife": 1
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropSumpLeftTime": 1,
+        "PropSumpLifeLevel": 2
+      },
+      "service": "Sump",
+      "siid": 25
+    },
+    "Vacuum": {
+      "aiid": {
+        "StartSweep": 1,
+        "StopSweeping": 2
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropVacuumFault": 2,
+        "PropVacuumStatus": 1
+      },
+      "service": "Vacuum",
+      "siid": 2
+    },
+    "VacuumExtend": {
+      "aiid": {
+        "clearWarn": 3,
+        "commandAction": 8,
+        "getPhotoInfo": 6,
+        "startBackflush": 4,
+        "startClean": 1,
+        "stopClean": 2
+      },
+      "piid": {},
+      "piid_symbolic": {
+        "PropAiSwitch": 22,
+        "PropAtuoRemoveMop": 45,
+        "PropAutoAddDetergent": 37,
+        "PropAutoDrainWater": 51,
+        "PropAutoSwitchSet": 50,
+        "PropAutoWashSwitch": 34,
+        "PropBackCleanMode": 62,
+        "PropBreakPointRestart": 11,
+        "PropCarpetClean": 36,
+        "PropCarpetDistinguish": 33,
+        "PropCarpetPress": 12,
+        "PropChildLock": 27,
+        "PropCleanCancel": 30,
+        "PropCleanExtendData": 10,
+        "PropCleanRagsTip": 16,
+        "PropCleanSetting": 23,
+        "PropCleanTaskSpeed": 63,
+        "PropCleaningArea": 3,
+        "PropCleaningMode": 4,
+        "PropCleaningTime": 2,
+        "PropCombinedData": 99,
+        "PropCustomCleanEnable": 26,
+        "PropDeviceCapability": 83,
+        "PropDryMopSpeed": 64,
+        "PropDryStopRemind": 55,
+        "PropDryTime": 40,
+        "PropFaults": 18,
+        "PropIntMessagePrompt": 56,
+        "PropKeepSweeperTime": 17,
+        "PropLaserSwitch": 21,
+        "PropMapAutLocation": 49,
+        "PropMopInStation": 52,
+        "PropMopMode": 5,
+        "PropMopPadInstall": 53,
+        "PropMopWay": 29,
+        "PropNationMatched": 19,
+        "PropNoWaterWarn": 41,
+        "PropPetAutoDetective": 59,
+        "PropQuickCommand": 48,
+        "PropRelocationStatus": 20,
+        "PropRemoteState": 15,
+        "PropRobotSpecCleanTask": 58,
+        "PropSensitivity": 28,
+        "PropSerialNumber": 14,
+        "PropStationCleanStep": 61,
+        "PropStringMessagePrompt": 57,
+        "PropTaskStatus": 7,
+        "PropTimingClean": 47,
+        "PropWarnStatus": 35,
+        "PropWashStation": 25,
+        "PropWaterAmountWashing": 46,
+        "PropWaterSelfCheckStatus": 54,
+        "PropWaterTankDrainage": 60,
+        "PropWaterboxStatus": 6,
+        "PropWorkMode": 1
+      },
+      "service": "VacuumExtend",
+      "siid": 4
+    },
+    "VslamExtend": {
+      "aiid": {},
+      "piid": {},
+      "piid_symbolic": {
+        "PropSaveMapStatus": 1
+      },
+      "service": "VslamExtend",
+      "siid": 13
+    },
+    "Wheel": {
+      "aiid": {},
+      "piid": {},
+      "piid_symbolic": {
+        "PropWheelLeftTime": 1,
+        "PropWheelLifeLevel": 2
+      },
+      "service": "Wheel",
+      "siid": 30
+    }
+  }
+}

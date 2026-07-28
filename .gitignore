@@ -2,3 +2,11 @@
 __pycache__/
 *.pyc
 .claude/*
+
+# Downloaded plugin bundles - large, redistributable-unclear, regenerable.
+# Generated profiles under custom_components/**/profiles/ ARE tracked.
+/plugins/
+
+# Local dev credentials
+.env
+secrets/

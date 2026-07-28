@@ -1,0 +1,4 @@
+requests
+# Auth is delegated to dreame_lib from the companion add-on repo; point at it
+# with DREAME_LIB_PATH. Its own deps (paho-mqtt, pycryptodome, python-miio)
+# must be installed too.
