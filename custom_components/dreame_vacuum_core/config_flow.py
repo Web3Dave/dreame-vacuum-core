@@ -12,6 +12,8 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -40,6 +42,11 @@ _LOGGER = logging.getLogger(__name__)
 
 class DreameVacuumCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(entry: ConfigEntry) -> "DreameVacuumCoreOptionsFlow":
+        return DreameVacuumCoreOptionsFlow()
 
     def __init__(self) -> None:
         self._account: dict[str, Any] = {}
@@ -142,8 +149,14 @@ class DreameVacuumCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 int(user_input[CONF_COMPANION_PORT]),
                 token,
             )
-            if not await client.async_health():
+            # Check the token, not just reachability: /health is
+            # unauthenticated, so validating against it would let a wrong
+            # token through setup and only fail later on every real call.
+            auth = await client.async_check_auth()
+            if auth is None:
                 errors["base"] = "companion_unreachable"
+            elif auth is False:
+                errors["base"] = "companion_bad_token"
             else:
                 return self._create(
                     enable_camera=True,
@@ -193,3 +206,66 @@ class DreameVacuumCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             )
         return self.async_create_entry(title=self._chosen.get("name") or self._chosen["did"], data=data)
+
+
+class DreameVacuumCoreOptionsFlow(config_entries.OptionsFlow):
+    """Edit the companion add-on settings after setup.
+
+    Without this the API token could only be changed by deleting and
+    re-adding the integration, which also loses entity ids and history.
+    """
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+        cfg = {**self.config_entry.data, **self.config_entry.options}
+
+        if user_input is not None:
+            token = (user_input.get(CONF_COMPANION_TOKEN) or "").strip()
+
+            if not token:
+                # Clearing the token disables the camera rather than leaving a
+                # half-configured client that 401s on every call.
+                return self.async_create_entry(
+                    data={**self.config_entry.options, CONF_ENABLE_CAMERA: False,
+                          CONF_COMPANION_TOKEN: ""}
+                )
+
+            client = CompanionClient(
+                async_get_clientsession(self.hass),
+                user_input[CONF_COMPANION_HOST],
+                int(user_input[CONF_COMPANION_PORT]),
+                token,
+            )
+            auth = await client.async_check_auth()
+            if auth is None:
+                errors["base"] = "companion_unreachable"
+            elif auth is False:
+                errors["base"] = "companion_bad_token"
+            else:
+                return self.async_create_entry(
+                    data={
+                        **self.config_entry.options,
+                        CONF_ENABLE_CAMERA: True,
+                        CONF_COMPANION_HOST: user_input[CONF_COMPANION_HOST],
+                        CONF_COMPANION_PORT: int(user_input[CONF_COMPANION_PORT]),
+                        CONF_COMPANION_TOKEN: token,
+                        CONF_CAMERA_PIN: (user_input.get(CONF_CAMERA_PIN) or "").strip(),
+                    }
+                )
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_COMPANION_HOST, default=cfg.get(CONF_COMPANION_HOST, "localhost")
+                ): str,
+                vol.Optional(
+                    CONF_COMPANION_PORT,
+                    default=int(cfg.get(CONF_COMPANION_PORT, DEFAULT_COMPANION_PORT)),
+                ): int,
+                vol.Optional(
+                    CONF_COMPANION_TOKEN, default=cfg.get(CONF_COMPANION_TOKEN, "")
+                ): str,
+                vol.Optional(CONF_CAMERA_PIN, default=cfg.get(CONF_CAMERA_PIN, "")): str,
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

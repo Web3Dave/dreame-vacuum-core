@@ -36,7 +36,7 @@ class DreameSnapshotButton(DreameEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         c = self.coordinator
-        data = c.entry.data
+        data = c.config
         path = await c.companion.async_capture(
             data[CONF_USERNAME],
             data[CONF_PASSWORD],

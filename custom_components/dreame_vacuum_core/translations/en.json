@@ -13,7 +13,9 @@
       "device": {
         "title": "Select device",
         "description": "Found {count} device(s) on this account.",
-        "data": { "did": "Device" }
+        "data": {
+          "did": "Device"
+        }
       },
       "camera": {
         "title": "Camera (optional)",
@@ -30,10 +32,29 @@
       "invalid_auth": "Could not sign in - check the username, password and region",
       "no_devices": "No devices found on this account",
       "cannot_connect": "Could not reach Dreame's servers",
-      "companion_unreachable": "Could not reach the companion add-on - check host, port and token"
+      "companion_unreachable": "Could not reach the companion add-on - check the host and port",
+      "companion_bad_token": "The companion add-on rejected the API token - copy it exactly from the add-on's Configuration tab"
     },
     "abort": {
       "already_configured": "This device is already set up"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Companion add-on",
+        "description": "Update the connection to the Dreame Vacuum Companion add-on. Clear the token to turn the camera off.",
+        "data": {
+          "companion_host": "Companion host",
+          "companion_port": "Companion port",
+          "companion_token": "Companion API token",
+          "camera_pin": "Camera privacy PIN"
+        }
+      }
+    },
+    "error": {
+      "companion_unreachable": "Could not reach the companion add-on - check the host and port",
+      "companion_bad_token": "The companion add-on rejected the API token - copy it exactly from the add-on's Configuration tab"
     }
   }
 }

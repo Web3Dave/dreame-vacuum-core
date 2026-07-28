@@ -43,7 +43,7 @@ class DreameCamera(DreameEntity, Camera):
 
     async def stream_source(self) -> str | None:
         c = self.coordinator
-        data = c.entry.data
+        data = c.config
         return await c.companion.async_stream_start(
             data[CONF_USERNAME],
             data[CONF_PASSWORD],

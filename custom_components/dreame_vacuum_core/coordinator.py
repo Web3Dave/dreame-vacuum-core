@@ -78,9 +78,12 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.entry = entry
-        self.did: str = entry.data[CONF_DID]
-        self.model: str = entry.data.get(CONF_MODEL) or "unknown"
-        self.device_name: str = entry.data.get(CONF_NAME) or self.model
+        # Options override data so the companion settings (host/port/token/PIN)
+        # stay editable after setup without re-adding the integration.
+        cfg = {**entry.data, **entry.options}
+        self.did: str = cfg[CONF_DID]
+        self.model: str = cfg.get(CONF_MODEL) or "unknown"
+        self.device_name: str = cfg.get(CONF_NAME) or self.model
 
         self.profile: DeviceProfile = load_profile(self.model)
         self._protocol: DreameVacuumProtocol | None = None
@@ -92,12 +95,12 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._keep_alive_cancel = None
 
         self.companion: CompanionClient | None = None
-        if entry.data.get(CONF_ENABLE_CAMERA) and entry.data.get(CONF_COMPANION_TOKEN):
+        if cfg.get(CONF_ENABLE_CAMERA) and cfg.get(CONF_COMPANION_TOKEN):
             self.companion = CompanionClient(
                 async_get_clientsession(hass),
-                entry.data.get(CONF_COMPANION_HOST, "localhost"),
-                int(entry.data.get(CONF_COMPANION_PORT, DEFAULT_COMPANION_PORT)),
-                entry.data[CONF_COMPANION_TOKEN],
+                cfg.get(CONF_COMPANION_HOST, "localhost"),
+                int(cfg.get(CONF_COMPANION_PORT, DEFAULT_COMPANION_PORT)),
+                cfg[CONF_COMPANION_TOKEN],
             )
 
         super().__init__(
@@ -127,9 +130,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _build_protocol(self) -> DreameVacuumProtocol:
         return DreameVacuumProtocol(
-            username=self.entry.data[CONF_USERNAME],
-            password=self.entry.data[CONF_PASSWORD],
-            country=self.entry.data.get(CONF_COUNTRY, "eu"),
+            username=self.config[CONF_USERNAME],
+            password=self.config[CONF_PASSWORD],
+            country=self.config.get(CONF_COUNTRY, "eu"),
             prefer_cloud=True,
             account_type="dreame",
         )
@@ -312,6 +315,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ]
         if await self.companion.async_register(self.entry.entry_id, payload):
             _LOGGER.debug("Registered %s with companion add-on", self.device_name)
+
+    @property
+    def config(self) -> dict:
+        """Config entry data with options layered on top."""
+        return {**self.entry.data, **self.entry.options}
 
     @property
     def _slug(self) -> str:

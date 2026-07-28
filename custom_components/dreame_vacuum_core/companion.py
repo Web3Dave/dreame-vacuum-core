@@ -47,6 +47,9 @@ class CompanionClient:
             return None
 
     async def async_health(self) -> bool:
+        """Reachability only. /health is deliberately unauthenticated, so this
+        says nothing about whether the token is right - use async_check_auth
+        for that."""
         try:
             async with self._session.get(
                 f"{self._base}/health", timeout=aiohttp.ClientTimeout(total=10)
@@ -54,6 +57,24 @@ class CompanionClient:
                 return resp.status == 200
         except (aiohttp.ClientError, TimeoutError):
             return False
+
+    async def async_check_auth(self) -> bool | None:
+        """Verify the API token against an authenticated endpoint.
+
+        Returns True (token accepted), False (rejected) or None (add-on not
+        reachable) so the caller can tell "wrong token" from "wrong host".
+        """
+        try:
+            async with self._session.get(
+                f"{self._base}/registered",
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 401:
+                    return False
+                return resp.status == 200
+        except (aiohttp.ClientError, TimeoutError):
+            return None
 
     async def async_register(self, entry_id: str, devices: list[dict]) -> bool:
         """Tell the add-on which devices belong to this integration.
