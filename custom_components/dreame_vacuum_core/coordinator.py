@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import random
 import time
 from typing import Any
@@ -63,6 +64,10 @@ from .profile import DeviceProfile, load_profile
 from .transport import DreameVacuumProtocol
 
 _LOGGER = logging.getLogger(__name__)
+
+# The device's cruise-to-point work mode. Driving to a location is expressed
+# as "start a cleaning task of this kind", not as a movement command.
+CRUISE_POINT_MODE = 23
 
 # Properties we try to read every cycle, expressed in vocabulary terms so the
 # numeric ids come from the generated profile rather than being hardcoded.
@@ -382,6 +387,83 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._protocol.set_property, ids[0], ids[1], payload, 1
         )
         return bool(isinstance(result, list) and result and result[0].get("code") == 0)
+
+    async def async_go_to_point(
+        self,
+        x: int,
+        y: int,
+        heading: float | None = None,
+        arrival_tolerance: int = 250,
+        timeout: float = 180.0,
+    ) -> None:
+        """Drive to a point on the current map, optionally facing a heading.
+
+        There is no dedicated "go to" action. The app does this by starting a
+        cleaning task in the cruise-to-point mode and passing the target in
+        the task's parameters, so that is what this sends.
+        """
+        mode_ids = self.profile.prop_id("VacuumExtend", "PropWorkMode")
+        extend_ids = self.profile.prop_id("VacuumExtend", "PropCleanExtendData")
+        if mode_ids is None or extend_ids is None:
+            raise HomeAssistantError(f"{self.device_name} does not support go-to-point")
+
+        # Sanity-check against the frame the coordinates belong to. Numbers
+        # from an older map put the robot somewhere arbitrary, and it will
+        # happily drive there.
+        start = await self.async_refresh_position()
+        if start is None:
+            raise HomeAssistantError(
+                f"Could not read {self.device_name}'s position. {self._position_diagnosis()}"
+            )
+
+        params = json.dumps({"tpoint": [[int(x), int(y), 0, 0]]}, separators=(",", ":"))
+        ok = await self.async_action(
+            "VacuumExtend",
+            "startClean",
+            [
+                {"piid": mode_ids[1], "value": CRUISE_POINT_MODE},
+                {"piid": extend_ids[1], "value": params},
+            ],
+        )
+        if not ok:
+            raise HomeAssistantError(f"{self.device_name} rejected the go-to-point command")
+
+        await self._async_wait_until_arrived(int(x), int(y), arrival_tolerance, timeout)
+
+        if heading is not None:
+            # Leave cruise mode first: the task keeps control of the drive and
+            # would fight the rotation nudges.
+            await self.async_action("Vacuum", "StopSweeping")
+            await asyncio.sleep(3)
+            await self.async_rotate_to_heading(heading)
+
+    async def _async_wait_until_arrived(
+        self, x: int, y: int, arrival_tolerance: int, timeout: float
+    ) -> None:
+        """Poll position until the robot is near the target.
+
+        startClean returns as soon as the command is accepted, not on arrival,
+        so without this a following rotation would run while the robot is
+        still driving.
+        """
+        deadline = time.monotonic() + timeout
+        closest: float | None = None
+
+        while time.monotonic() < deadline:
+            await self.hass.async_add_executor_job(self._read_map_frame)
+            pos = self.position or {}
+            if pos.get("x") is not None:
+                distance = math.hypot(pos["x"] - x, pos["y"] - y)
+                if distance <= arrival_tolerance:
+                    return
+                if closest is None or distance < closest:
+                    closest = distance
+            await asyncio.sleep(3)
+
+        raise HomeAssistantError(
+            f"{self.device_name} did not reach ({x}, {y}) within {int(timeout)}s"
+            + (f" - got within {int(closest)}mm" if closest is not None else "")
+        )
 
     async def async_rotate_to_heading(
         self,

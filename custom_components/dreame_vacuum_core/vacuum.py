@@ -55,6 +55,12 @@ ATTR_TOLERANCE = "tolerance"
 ATTR_MAX_ATTEMPTS = "max_attempts"
 ATTR_DAMPING = "damping"
 
+SERVICE_GO_TO_POINT = "go_to_point"
+ATTR_X = "x"
+ATTR_Y = "y"
+ATTR_ARRIVAL_TOLERANCE = "arrival_tolerance"
+ATTR_TIMEOUT = "timeout"
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -78,6 +84,22 @@ async def async_setup_entry(
             ),
         },
         "async_rotate_to_heading",
+    )
+    platform.async_register_entity_service(
+        SERVICE_GO_TO_POINT,
+        {
+            vol.Required(ATTR_X): vol.Coerce(int),
+            vol.Required(ATTR_Y): vol.Coerce(int),
+            # Optional: omit to arrive without caring which way it faces.
+            vol.Optional(ATTR_HEADING): vol.All(vol.Coerce(float), vol.Range(min=0, max=359)),
+            vol.Optional(ATTR_ARRIVAL_TOLERANCE, default=250): vol.All(
+                vol.Coerce(int), vol.Range(min=50, max=2000)
+            ),
+            vol.Optional(ATTR_TIMEOUT, default=180): vol.All(
+                vol.Coerce(float), vol.Range(min=10, max=600)
+            ),
+        },
+        "async_go_to_point",
     )
 
 
@@ -187,4 +209,16 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
     ) -> None:
         await self.coordinator.async_rotate_to_heading(
             heading, tolerance=tolerance, max_attempts=max_attempts, damping=damping
+        )
+
+    async def async_go_to_point(
+        self,
+        x: int,
+        y: int,
+        heading: float | None = None,
+        arrival_tolerance: int = 250,
+        timeout: float = 180.0,
+    ) -> None:
+        await self.coordinator.async_go_to_point(
+            x, y, heading=heading, arrival_tolerance=arrival_tolerance, timeout=timeout
         )
