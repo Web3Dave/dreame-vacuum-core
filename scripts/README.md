@@ -124,7 +124,18 @@ open - snapshotting properties around each, to establish whether an open
 camera session is what stops the robot vacuuming as it turns.
 
 ```
+# fast, observational: two 180 degree turns, waits for you before each
+python scripts/rotate_experiment.py --did <device id> \
+    --degrees 180 --no-snapshots --pause
+
+# full version, with the 242-property dumps and diffs
 python scripts/rotate_experiment.py --did <device id>
+```
+
+Needs the companion package on PYTHONPATH for the camera calls:
+
+```
+PYTHONPATH=../dreame-vacuum-companion/dreame_vacuum_companion python scripts/...
 ```
 
 Reads credentials from `.env` in the repo root (DREAME_USERNAME,

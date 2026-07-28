@@ -187,6 +187,10 @@ def main() -> int:
     ap.add_argument("--outdir", default=".", help="where to write snapshots")
     ap.add_argument("--hold", type=float, help="seconds to hold the turn, overriding the angle")
     ap.add_argument("--skip-monitor", action="store_true", help="just rotate once, no snapshots")
+    ap.add_argument("--no-snapshots", action="store_true",
+                    help="skip the property dumps - much faster, purely observational")
+    ap.add_argument("--pause", action="store_true",
+                    help="wait for Enter before each turn so you can be watching")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parents[2]
@@ -231,16 +235,27 @@ def main() -> int:
         return 0
 
     def snapshot(name: str) -> dict:
+        if args.no_snapshots:
+            return {}
         print(f"\n--- snapshot: {name}")
         data = collect(protocol, args.did)
         (outdir / f"{name}.json").write_text(json.dumps(data, indent=2, sort_keys=True))
         return data
 
+    def countdown(label: str) -> None:
+        hold = args.hold if args.hold is not None else abs(args.degrees) / TURN_RATE_DPS
+        print(f"\n>>> {label}")
+        print(f">>> {args.degrees:.0f} degrees = {hold:.1f}s of turning. Watch the brushes.")
+        if args.pause:
+            input(">>> Press Enter when you are watching the robot... ")
+        for n in (3, 2, 1):
+            print(f"    {n}...", flush=True)
+            time.sleep(1)
+        print("    TURNING NOW", flush=True)
+
     idle = snapshot("1-idle")
 
-    print(f"\n>>> ROTATING {args.degrees} degrees with NO monitor session.")
-    print(">>> WATCH THE ROBOT: do the brushes/mop run?")
-    time.sleep(3)
+    countdown("TURN 1 of 2: no live view session")
     rotate(protocol, args.degrees, hold=args.hold)
     time.sleep(2)
     plain = snapshot("2-after-plain-rotate")
@@ -250,10 +265,8 @@ def main() -> int:
     time.sleep(3)
     monitoring = snapshot("3-monitor-open")
 
-    print(f"\n>>> ROTATING {args.degrees} degrees WITH the live view session open.")
-    print(">>> WATCH THE ROBOT: do the brushes/mop run this time?")
     camera_keep_alive(protocol, args.did, session)
-    time.sleep(3)
+    countdown("TURN 2 of 2: live view session OPEN")
     rotate(protocol, args.degrees, hold=args.hold)
     camera_keep_alive(protocol, args.did, session)
     time.sleep(2)
