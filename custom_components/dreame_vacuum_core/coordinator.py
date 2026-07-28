@@ -299,7 +299,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return time.monotonic() - self._position_at
 
     async def async_refresh_position(
-        self, timeout: float = 8.0, max_age: float = 0.0
+        self, timeout: float = 20.0, max_age: float = 0.0
     ) -> float | None:
         """Force a map frame and wait for the pose it carries.
 
@@ -337,7 +337,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 pos = self.position
                 if pos and pos.get("frame_id") != before and pos.get("angle") is not None:
                     return float(pos["angle"])
-            await asyncio.sleep(0.5)
+            # Each attempt may be a full cloud round trip (resolve name, sign
+            # a url, download), and the device needs a moment to upload the
+            # frame it was just asked for, so don't hammer it.
+            await asyncio.sleep(1.5)
         return None
 
     def _position_diagnosis(self) -> str:
@@ -370,15 +373,19 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if ids is None or self._protocol is None:
             return False
 
+        # Deliberately the cloud REST API (cloud.get_properties, keyed "6.3")
+        # rather than protocol.get_properties, which asks the device itself
+        # over RPC. The object name is account-side state held by Dreame's
+        # servers; the device does not answer for it, which is why reading it
+        # the usual way came back empty.
         try:
-            result = self._protocol.get_properties(
-                [{"did": self.did, "siid": ids[0], "piid": ids[1]}]
-            )
+            result = self._protocol.cloud.get_properties(f"{ids[0]}.{ids[1]}")
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Object name read failed: %s", err)
             return False
 
-        if not (isinstance(result, list) and result and result[0].get("code") == 0):
+        if not (isinstance(result, list) and result):
+            _LOGGER.debug("Object name query returned nothing")
             return False
 
         object_name = self._first_object_name(result[0].get("value"))
