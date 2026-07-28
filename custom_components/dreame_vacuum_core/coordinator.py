@@ -544,9 +544,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_wait_until_arrived(int(x), int(y), arrival_tolerance, timeout)
 
         if heading is not None:
-            # Leave cruise mode first: the task keeps control of the drive and
-            # would fight the rotation nudges.
-            await self.async_action("Vacuum", "StopSweeping")
+            # End the cruise task before rotating: it keeps control of the
+            # drive and would fight the nudges. Note stopClean, not
+            # Vacuum.StopSweeping - despite the name the latter is pause, and
+            # a paused mopping task sends the robot back to wash.
+            await self.async_action("VacuumExtend", "stopClean")
             await asyncio.sleep(3)
             await self.async_rotate_to_heading(heading)
 

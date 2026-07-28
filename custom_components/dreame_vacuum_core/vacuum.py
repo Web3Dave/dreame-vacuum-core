@@ -4,7 +4,8 @@ Commands map onto actions from the generated profile rather than hardcoded
 siid/aiid pairs, so a model whose ids differ works without code changes:
 
   start           -> VacuumExtend.startClean
-  pause / stop    -> Vacuum.StopSweeping
+  pause           -> Vacuum.StopSweeping   (pause, despite the name)
+  stop            -> VacuumExtend.stopClean
   return_to_base  -> Battery.StartCharge
   locate          -> Audio.position   (the robot announces itself)
 """
@@ -191,12 +192,12 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         await self.coordinator.async_action("VacuumExtend", "startClean")
 
     async def async_pause(self) -> None:
-        # The device exposes stop rather than a distinct pause action; HA's
-        # pause maps onto it so the button behaves as users expect.
         await self.coordinator.async_action("Vacuum", "StopSweeping")
 
     async def async_stop(self, **kwargs) -> None:
-        await self.coordinator.async_action("Vacuum", "StopSweeping")
+        # Ends the task. Vacuum.StopSweeping only pauses it, which left stop
+        # and pause doing the same thing.
+        await self.coordinator.async_action("VacuumExtend", "stopClean")
 
     async def async_return_to_base(self, **kwargs) -> None:
         await self.coordinator.async_action("Battery", "StartCharge")
