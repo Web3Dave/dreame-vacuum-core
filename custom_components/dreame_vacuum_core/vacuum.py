@@ -30,8 +30,9 @@ from .entity import DreameEntity
 
 _LOGGER = logging.getLogger(__name__)
 
-# The device's WorkMode enum, taken verbatim from the app's own plugin bundle
-# rather than inferred from observed values.
+# Work modes (siid 4 piid 1). The app's plugin bundle lists 27 of these; the
+# five marked below appear only in the upstream fork, which was built across
+# many more models - so the bundle is not the whole story.
 STATUS_IDLE = 0
 STATUS_PAUSED = 1            # PauseAndStopMode
 STATUS_AUTO_CLEAN = 2
@@ -52,7 +53,12 @@ STATUS_FAST_MAPPING = 21
 STATUS_MONITOR_CRUISE = 22
 STATUS_MONITOR_SPOT = 23     # the mode go_to_point uses
 STATUS_SUMMON_CLEAN = 24
+STATUS_SHORTCUT = 25           # not in the app bundle
 STATUS_PERSON_FOLLOW = 26
+STATUS_PET_GUARDING = 27       # not in the app bundle
+STATUS_AUTO_ARRANGEMENT = 28   # not in the app bundle
+STATUS_SMART_ARRANGEMENT = 29  # not in the app bundle
+STATUS_ZONED_ARRANGEMENT = 30  # not in the app bundle
 STATUS_WATER_SELF_CHECK = 1501
 
 CLEANING_STATES = {
@@ -64,6 +70,10 @@ CLEANING_STATES = {
     STATUS_SPOT_CLEAN,
     STATUS_FAST_MAPPING,
     STATUS_SUMMON_CLEAN,
+    STATUS_SHORTCUT,
+    STATUS_AUTO_ARRANGEMENT,
+    STATUS_SMART_ARRANGEMENT,
+    STATUS_ZONED_ARRANGEMENT,
 }
 
 # Driving under our own control, or following something - moving, but not
@@ -73,6 +83,82 @@ MOVING_STATES = {
     STATUS_MONITOR_CRUISE,
     STATUS_MONITOR_SPOT,
     STATUS_PERSON_FOLLOW,
+    STATUS_PET_GUARDING,
+}
+
+# A second, finer-grained enum on siid 2 piid 1 - what the app shows as the
+# activity label. Distinct from the work mode above and far more detailed, so
+# it is surfaced as a name rather than a bare number.
+DEVICE_STATES: dict[int, str] = {
+    1: "sweeping",
+    2: "idle",
+    3: "paused",
+    4: "error",
+    5: "returning",
+    6: "charging",
+    7: "mopping",
+    8: "drying",
+    9: "washing",
+    10: "returning_to_wash",
+    11: "building",
+    12: "sweeping_and_mopping",
+    13: "charging_completed",
+    14: "upgrading",
+    15: "clean_summon",
+    16: "station_reset",
+    17: "returning_install_mop",
+    18: "returning_remove_mop",
+    19: "water_check",
+    20: "clean_add_water",
+    21: "washing_paused",
+    22: "auto_emptying",
+    23: "remote_control",
+    24: "smart_charging",
+    25: "second_cleaning",
+    26: "human_following",
+    27: "spot_cleaning",
+    28: "returning_auto_empty",
+    29: "waiting_for_task",
+    30: "station_cleaning",
+    31: "returning_to_drain",
+    32: "draining",
+    33: "auto_water_draining",
+    34: "emptying",
+    35: "dust_bag_drying",
+    36: "dust_bag_drying_paused",
+    37: "heading_to_extra_cleaning",
+    38: "extra_cleaning",
+    95: "finding_pet_paused",
+    96: "finding_pet",
+    97: "shortcut",
+    98: "monitoring",
+    99: "monitoring_paused",
+    101: "initial_deep_cleaning",
+    102: "initial_deep_cleaning_paused",
+    103: "sanitizing",
+    104: "sanitizing_with_dry",
+    105: "changing_mop",
+    106: "changing_mop_paused",
+    107: "floor_maintaining",
+    108: "floor_maintaining_paused",
+    109: "remote_pickup",
+    113: "arranging_items",
+    114: "pet_guarding",
+    115: "pet_guarding_paused",
+    116: "installing_mop",
+    117: "uninstalling_mop",
+    118: "intelligent_recharging",
+    120: "assisted_cleaning",
+    121: "entering_dock",
+    122: "leaving_dock",
+    140: "navigating_to_climber",
+    141: "docking_to_climber",
+    142: "climber_docked",
+    143: "climber_navigating",
+    144: "climbing_stairs",
+    145: "climbing_stairs_completed",
+    146: "climber_at_dock",
+    147: "climber_leaving_dock",
 }
 
 CHARGING_STATUS_CHARGING = 1
@@ -96,6 +182,15 @@ SERVICE_REMOTE_CONTROL = "remote_control"
 ATTR_ROTATION = "rotation"
 ATTR_VELOCITY = "velocity"
 ATTR_DURATION = "duration"
+
+
+def _device_state_name(value) -> str | None:
+    """Name the state where we know it, otherwise pass the number through."""
+    try:
+        code = int(value)
+    except (TypeError, ValueError):
+        return None
+    return DEVICE_STATES.get(code, str(code))
 
 
 async def async_setup_entry(
@@ -215,7 +310,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
             "model": c.model,
             "did": c.did,
             "work_mode": c.value("VacuumExtend", "PropWorkMode"),
-            "device_state": c.value("Vacuum", "PropVacuumStatus"),
+            "device_state": _device_state_name(c.value("Vacuum", "PropVacuumStatus")),
             "fault": c.value("Vacuum", "PropVacuumFault"),
             "profiled": c.profile.profiled,
         }
