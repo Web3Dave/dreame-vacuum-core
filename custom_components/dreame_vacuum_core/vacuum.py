@@ -122,6 +122,26 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
             "fault": c.value("Vacuum", "PropVacuumFault"),
             "profiled": c.profile.profiled,
         }
+
+        # Pose, when a map frame has been seen. x/y are millimetres in the
+        # map's own frame of reference and angle is degrees; both are only
+        # meaningful relative to `map_id`, which changes when the map is
+        # rebuilt.
+        if c.position:
+            attrs.update(
+                {
+                    "map_id": c.position.get("map_id"),
+                    "position_x": c.position.get("x"),
+                    "position_y": c.position.get("y"),
+                    "heading": c.position.get("angle"),
+                    "charger_x": c.position.get("charger_x"),
+                    "charger_y": c.position.get("charger_y"),
+                }
+            )
+            # Distinct from "no frame yet": the robot is on the map but can't
+            # place itself, which is worth surfacing rather than hiding.
+            attrs["located"] = c.position.get("x") is not None
+
         return {k: v for k, v in attrs.items() if v is not None}
 
     async def async_start(self) -> None:

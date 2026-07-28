@@ -37,6 +37,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, coordinator.async_register_with_companion(), name=f"{DOMAIN}_register"
     )
 
+    # The device only pushes map frames while it is moving, so a vacuum that
+    # has been parked on its dock since before HA started would report no
+    # position at all until its next clean. Ask once at startup.
+    entry.async_create_background_task(
+        hass, coordinator.async_request_map(), name=f"{DOMAIN}_map"
+    )
+
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 

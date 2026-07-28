@@ -51,6 +51,7 @@ from .const import (
     PROPERTY_BATCH_SIZE,
     SIID_DEVICE_KEEP_ALIVE,
 )
+from .map_data import decode_position
 from .profile import DeviceProfile, load_profile
 from .transport import DreameVacuumProtocol
 
@@ -103,6 +104,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.profile: DeviceProfile = load_profile(self.model)
         self._protocol: DreameVacuumProtocol | None = None
+
+        # Robot pose, decoded from map frames. Kept out of `data` because map
+        # frames arrive by push on their own schedule, not from the poll.
+        self.position: dict | None = None
+        self._map_ids = self.profile.prop_id("CleanMap", "PropMapdata")
 
         # siid.piid -> bool; None until probed
         self._present: dict[str, bool] = {}
@@ -221,12 +227,48 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             updates[f"{siid}.{piid}"] = param.get("value")
 
+        self._absorb_map_frame(updates)
+
         if not updates:
             return
 
         self._last_change = time.time()
         merged = {**(self.data or {}), **updates}
         self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, merged)
+
+    # -- map / position ---------------------------------------------------
+    def _absorb_map_frame(self, updates: dict[str, Any]) -> None:
+        """Pull the pose out of any map frame in this batch, then drop it.
+
+        Map payloads are tens of kilobytes of base64 and change constantly;
+        keeping them in coordinator data would push that through every entity
+        state write for no benefit.
+        """
+        if self._map_ids is None:
+            return
+        raw = updates.pop(f"{self._map_ids[0]}.{self._map_ids[1]}", None)
+        if not isinstance(raw, str):
+            return
+
+        position = decode_position(raw, self.profile.flag("AES_IV"))
+        if position is None:
+            return
+        self.position = position
+        self._last_change = time.time()
+
+    async def async_request_map(self) -> bool:
+        """Ask for a full map frame.
+
+        The device pushes frames while it is moving but goes quiet when idle,
+        so this is how the position gets refreshed on demand - at startup, or
+        before anything that needs to know where the robot is.
+        """
+        ids = self.profile.prop_id("CleanMap", "PropFrameInfo")
+        if ids is None:
+            return False
+        return await self.async_action(
+            "CleanMap", "mapReq", [{"piid": ids[1], "value": '{"frame_type":"I"}'}]
+        )
 
     # -- keep-alive -------------------------------------------------------
     async def _async_keep_alive(self, _now) -> None:
