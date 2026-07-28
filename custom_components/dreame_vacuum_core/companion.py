@@ -115,9 +115,18 @@ class CompanionClient:
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status != 200:
+                    # Worth a warning: the symptom the user sees is a Stream
+                    # switch stuck on "unavailable" with nothing in the log.
+                    _LOGGER.warning(
+                        "Companion add-on returned HTTP %s for /stream/status", resp.status
+                    )
                     return None
+                self._warned = False
                 return bool((await resp.json()).get("running"))
-        except (aiohttp.ClientError, TimeoutError):
+        except (aiohttp.ClientError, TimeoutError) as err:
+            if not self._warned:
+                _LOGGER.warning("Companion add-on unreachable at %s: %s", self._base, err)
+                self._warned = True
             return None
 
     async def async_capture(

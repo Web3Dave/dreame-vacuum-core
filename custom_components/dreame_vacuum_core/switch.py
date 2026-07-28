@@ -47,6 +47,13 @@ class DreameStreamSwitch(DreameEntity, SwitchEntity):
         super().__init__(coordinator, "stream")
         self._running: bool | None = None
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # Polling only starts one SCAN_INTERVAL after the entity is added, so
+        # without this the switch sits unavailable for 30s after every restart.
+        await self.async_update()
+        self.async_write_ha_state()
+
     @property
     def available(self) -> bool:
         # Unknown means the add-on didn't answer - better to show unavailable

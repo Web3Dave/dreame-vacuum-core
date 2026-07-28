@@ -18,6 +18,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .companion import CompanionClient
+from .coordinator import device_display_name
 from .const import (
     CONF_CAMERA_PIN,
     CONF_COMPANION_HOST,
@@ -110,7 +111,7 @@ class DreameVacuumCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             out.append(
                 {
                     "did": str(rec.get("did")),
-                    "name": rec.get("customName") or rec.get("model"),
+                    "name": device_display_name(rec),
                     "model": rec.get("model"),
                     "mac": rec.get("mac"),
                 }

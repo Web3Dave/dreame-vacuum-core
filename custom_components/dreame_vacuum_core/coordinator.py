@@ -73,6 +73,22 @@ CORE_PROPERTIES: list[tuple[str, str]] = [
 ]
 
 
+def device_display_name(record: dict) -> str:
+    """The name to show the user, from a cloud device record.
+
+    The name you set in the Dreamehome app is `customName`; a device you never
+    renamed has an empty one and carries the app's own label in
+    deviceInfo.displayName. Falling straight through to the model is what
+    produced device names - and so entity ids - like `dreame_vacuum_r2579h`.
+    """
+    return (
+        record.get("customName")
+        or (record.get("deviceInfo") or {}).get("displayName")
+        or record.get("model")
+        or str(record.get("did"))
+    )
+
+
 class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Owns the device connection, state and profile."""
 
@@ -118,6 +134,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not await self.hass.async_add_executor_job(self._protocol.cloud.login):
             raise ConfigEntryAuthFailed("Dreame login failed - credentials may have changed")
 
+        await self._async_repair_name()
+
         try:
             await self.hass.async_add_executor_job(self._connect)
         except Exception as err:  # noqa: BLE001 - surfaced as a retryable setup failure
@@ -127,6 +145,43 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._keep_alive_cancel = async_track_time_interval(
             self.hass, self._async_keep_alive, timedelta(seconds=KEEP_ALIVE_INTERVAL)
         )
+
+    async def _async_repair_name(self) -> None:
+        """Recover the real device name for entries created before it was read
+        correctly, which stored the model instead.
+
+        Guarded on name == model so this costs nothing on a healthy entry, and
+        runs before the platforms are set up so the device registry picks the
+        new name up straight away.
+        """
+        if self.device_name != self.model:
+            return
+
+        record = await self.hass.async_add_executor_job(self._lookup_device_record)
+        if not record:
+            return
+        name = device_display_name(record)
+        if not name or name == self.device_name:
+            return
+
+        _LOGGER.info("Renaming %s to %s", self.device_name, name)
+        self.device_name = name
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, CONF_NAME: name}
+        )
+
+    def _lookup_device_record(self) -> dict | None:
+        """Blocking - runs in the executor."""
+        assert self._protocol is not None
+        try:
+            devices = self._protocol.cloud.get_devices() or {}
+        except Exception as err:  # noqa: BLE001 - cosmetic, never fail setup for it
+            _LOGGER.debug("Could not re-read the device list: %s", err)
+            return None
+        for rec in devices.get("page", {}).get("records", []):
+            if str(rec.get("did")) == self.did:
+                return rec
+        return None
 
     def _build_protocol(self) -> DreameVacuumProtocol:
         return DreameVacuumProtocol(
