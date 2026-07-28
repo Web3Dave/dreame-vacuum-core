@@ -101,6 +101,19 @@ CORE_PROPERTIES: list[tuple[str, str]] = [
 ]
 
 
+def result_code(result: Any) -> Any:
+    """Pull the response code out of whatever shape the transport returned.
+
+    Calls come back as a dict for some methods and a list of dicts for
+    others, and the cloud occasionally nests one inside the other. Assuming a
+    dict raised "'list' object has no attribute 'get'" the first time an
+    action answered in list form.
+    """
+    while isinstance(result, list) and result:
+        result = result[0]
+    return result.get("code") if isinstance(result, dict) else None
+
+
 def device_display_name(record: dict) -> str:
     """The name to show the user, from a cloud device record.
 
@@ -531,7 +544,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         result = await self.hass.async_add_executor_job(
             self._protocol.set_property, ids[0], ids[1], payload, 1
         )
-        return bool(isinstance(result, list) and result and result[0].get("code") == 0)
+        return result_code(result) == 0
 
     async def async_go_to_point(
         self,
@@ -804,7 +817,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         result = await self.hass.async_add_executor_job(
             self._protocol.set_property, siid, piid, value
         )
-        ok = isinstance(result, list) and result and result[0].get("code") == 0
+        ok = result_code(result) == 0
         if ok:
             self._last_change = time.time()
             await self.async_request_refresh()
@@ -819,7 +832,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         result = await self.hass.async_add_executor_job(
             self._protocol.action, siid, aiid, params or []
         )
-        ok = bool(result and result.get("code") == 0)
+        ok = result_code(result) == 0
         if ok:
             self._last_change = time.time()
             await self.async_request_refresh()
