@@ -290,13 +290,12 @@ def main() -> int:
     time.sleep(args.delay)
     monitoring = snapshot("3-live-view-open")
 
-    # --- turn 2: live view open, nothing else changed -----------------
     camera_keep_alive(protocol, args.did, session)
     announce("TURN 2: live view OPEN - nothing else changed")
     rotate(protocol, args.degrees, hold=args.hold)
     camera_keep_alive(protocol, args.did, session)
     time.sleep(2)
-    snapshot("5-after-quiet-rotate")
+    snapshot("4-after-live-view-rotate")
 
     print("\n--- closing the live view session")
     stop_live_view(protocol, args.did, session)
