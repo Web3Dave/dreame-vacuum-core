@@ -12,7 +12,13 @@ from .coordinator import DreameCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.VACUUM, Platform.SENSOR, Platform.CAMERA, Platform.BUTTON]
+PLATFORMS: list[Platform] = [
+    Platform.VACUUM,
+    Platform.SENSOR,
+    Platform.CAMERA,
+    Platform.BUTTON,
+    Platform.SWITCH,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

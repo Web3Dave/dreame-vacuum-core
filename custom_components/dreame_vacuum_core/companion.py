@@ -105,6 +105,21 @@ class CompanionClient:
         result = await self._post("/stream/stop", {"did": did})
         return bool(result and result.get("success"))
 
+    async def async_stream_status(self, did: str) -> bool | None:
+        """True/False if known, None if the add-on couldn't be reached."""
+        try:
+            async with self._session.get(
+                f"{self._base}/stream/status",
+                params={"did": did},
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                return bool((await resp.json()).get("running"))
+        except (aiohttp.ClientError, TimeoutError):
+            return None
+
     async def async_capture(
         self, username: str, password: str, country: str, pin: str, did: str
     ) -> str | None:

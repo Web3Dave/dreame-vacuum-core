@@ -15,6 +15,7 @@ battery and status, and optionally a live camera feed.
 | **Battery** | Battery percentage |
 | **Volume** | Speaker volume |
 | **Camera** \* | Live view and still images |
+| **Stream** \* | Switch to keep the feed running (for automations) |
 | **Take snapshot** \* | Saves a photo to your Media browser |
 
 \* Camera entities need the companion add-on — see below.
