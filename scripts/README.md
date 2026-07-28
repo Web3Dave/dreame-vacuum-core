@@ -29,7 +29,7 @@ export DREAME_PASSWORD='...'
 export DREAME_COUNTRY='eu'
 
 # 2. auth code lives in the companion add-on repo - point at it
-export DREAME_LIB_PATH=../dreame-vacuum-companion/dreame_capture
+export DREAME_LIB_PATH=../dreame-vacuum-companion/dreame_vacuum_companion
 
 # 3. download bundles into ./plugins/ (untracked)
 python3 scripts/fetch_plugins.py --models-file scripts/models.txt --from-account

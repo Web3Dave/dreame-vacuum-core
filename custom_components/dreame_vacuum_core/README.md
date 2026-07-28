@@ -30,7 +30,7 @@ with a fluffing-roller sensor on a vacuum that has none.
 
 ```bash
 export DREAME_USERNAME=... DREAME_PASSWORD=... DREAME_COUNTRY=eu
-export DREAME_LIB_PATH=../dreame-vacuum-companion/dreame_capture
+export DREAME_LIB_PATH=../dreame-vacuum-companion/dreame_vacuum_companion
 python3 scripts/fetch_plugins.py --models-file scripts/models.txt --from-account
 python3 scripts/extract_profiles.py
 ```
