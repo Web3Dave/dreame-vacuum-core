@@ -191,6 +191,9 @@ def main() -> int:
                     help="skip the property dumps - much faster, purely observational")
     ap.add_argument("--pause", action="store_true",
                     help="wait for Enter before each turn so you can be watching")
+    ap.add_argument("--no-live-view", action="store_true",
+                    help="skip opening the live view, so both turns are identical - "
+                         "the control run for whether the session matters at all")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parents[2]
@@ -260,20 +263,30 @@ def main() -> int:
     time.sleep(2)
     plain = snapshot("2-after-plain-rotate")
 
-    print("\n--- opening a live view session (full app sequence)")
-    session, channel = start_live_view(protocol, args.did, pin)
-    time.sleep(3)
+    session = None
+    if args.no_live_view:
+        print("\n--- SKIPPING the live view session (control run)")
+    else:
+        print("\n--- opening a live view session (full app sequence)")
+        session, channel = start_live_view(protocol, args.did, pin)
+        time.sleep(3)
     monitoring = snapshot("3-monitor-open")
 
-    camera_keep_alive(protocol, args.did, session)
-    countdown("TURN 2 of 2: live view session OPEN")
+    if session:
+        camera_keep_alive(protocol, args.did, session)
+    countdown(
+        "TURN 2 of 2: live view session OPEN" if session
+        else "TURN 2 of 2: still no live view (control)"
+    )
     rotate(protocol, args.degrees, hold=args.hold)
-    camera_keep_alive(protocol, args.did, session)
+    if session:
+        camera_keep_alive(protocol, args.did, session)
     time.sleep(2)
     snapshot("4-after-monitor-rotate")
 
-    print("\n--- closing the live view session")
-    stop_live_view(protocol, args.did, session)
+    if session:
+        print("\n--- closing the live view session")
+        stop_live_view(protocol, args.did, session)
 
     print("\n" + "=" * 60)
     print("IDLE vs LIVE VIEW OPEN - what the session changes:")
