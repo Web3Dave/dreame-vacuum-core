@@ -42,6 +42,7 @@ PIID_MONITOR = 1
 PIID_STREAM_CODE_OPEN = 1100
 PIID_VERIFY_ACCESS_CODE = 1102
 AIID_STREAM_CODE = 4
+PIID_CAMERA_KEEP_ALIVE = 6
 
 
 def load_env(root: Path) -> dict:
@@ -93,53 +94,89 @@ def rotate(protocol, degrees: float, hold: float | None = None) -> None:
     send_remote(protocol, 0)
 
 
-def start_monitor(protocol, pin: str) -> tuple[bool, str]:
-    """Open a monitor session - CAMERA_OPERATE on PropMonitor.
+def _signed_call(protocol, path, body):
+    from dreame_sign import sign_params
 
-    Mirrors the plugin's startMonitor(). The access-code steps come first
-    because the camera refuses to open without them; they are the same
-    sequence the companion add-on performs before streaming.
+    signed, _ = sign_params(body)
+    return protocol.cloud._api_call(path, signed)
+
+
+def _send_command_url(protocol) -> str:
+    strings = protocol.cloud._strings
+    host = f"-{protocol.cloud._host.split('.')[0]}" if protocol.cloud._host else ""
+    return f"{strings[37]}{host}/{strings[27]}/{strings[38]}"
+
+
+def camera_action(protocol, did: str, aiid: int, piid: int, value: dict):
+    """Camera actions go over the signed command API, not plain MIoT."""
+    req_id = int(time.time() * 1000) % 1000000
+    body = {
+        "did": did, "id": req_id,
+        "data": {
+            "did": did, "id": req_id, "method": "action",
+            "params": {
+                "did": did, "siid": SIID_MONITOR, "aiid": aiid,
+                "in": [{"piid": piid, "value": json.dumps(value, separators=(",", ":"))}],
+            },
+        },
+    }
+    return _signed_call(protocol, _send_command_url(protocol), body)
+
+
+def get_identity(protocol, did: str) -> tuple[str, str]:
+    """The XP2P product id / device name the live view addresses the camera by."""
+    resp = _signed_call(
+        protocol, "dreame-third-video/tx/mgr/dev/getIdentity", {"did": did, "os": "ios"}
+    )
+    if not resp or not resp.get("success"):
+        raise RuntimeError(f"getIdentity failed: {resp}")
+    data = resp["data"]["data"]
+    return data["productId"], data["deviceName"]
+
+
+def start_live_view(protocol, did: str, pin: str) -> tuple[str, str]:
+    """Everything the app does when its live view opens, short of the video.
+
+    An earlier attempt sent operType/monitor with no token or channelId and
+    the device accepted it without entering any different state - the app
+    passes both, and addresses the camera by its XP2P identity.
     """
-    session = str(uuid.uuid4())
-    try:
-        if pin:
-            protocol.action(
-                SIID_MONITOR, AIID_STREAM_CODE,
-                [{"piid": PIID_STREAM_CODE_OPEN,
-                  "value": json.dumps({"operType": "open", "session": session},
-                                      separators=(",", ":"))}],
-            )
-            protocol.action(
-                SIID_MONITOR, AIID_STREAM_CODE,
-                [{"piid": PIID_VERIFY_ACCESS_CODE,
-                  "value": json.dumps(
-                      {"operType": "verify",
-                       "oldcode": hashlib.sha256(pin.encode()).hexdigest(),
-                       "session": session},
-                      separators=(",", ":"))}],
-            )
-        result = protocol.action(
-            SIID_MONITOR, AIID_CAMERA_OPERATE,
-            [{"piid": PIID_MONITOR,
-              "value": json.dumps(
-                  {"operType": "monitor", "operation": "start", "session": session},
-                  separators=(",", ":"))}],
-        )
-        return True, json.dumps(result)[:300]
-    except Exception as err:  # noqa: BLE001
-        return False, str(err)
+    session = uuid.uuid4().hex
+    product_id, device_name = get_identity(protocol, did)
+    print(f"    identity: {product_id}/{device_name}")
+
+    r1 = camera_action(protocol, did, AIID_STREAM_CODE, PIID_STREAM_CODE_OPEN,
+                       {"open": True, "session": session})
+    print(f"    open:   {_summarise(r1)}")
+
+    r2 = camera_action(protocol, did, AIID_STREAM_CODE, PIID_VERIFY_ACCESS_CODE,
+                       {"oldcode": hashlib.sha256(pin.encode()).hexdigest(),
+                        "lazymode": 0, "session": session})
+    print(f"    verify: {_summarise(r2)}")
+
+    r3 = camera_action(protocol, did, AIID_CAMERA_OPERATE, PIID_MONITOR,
+                       {"token": "tx", "channelId": f"{product_id}/{device_name}",
+                        "operType": "monitor", "operation": "start", "session": session})
+    print(f"    start:  {_summarise(r3)}")
+    return session, f"{product_id}/{device_name}"
 
 
-def stop_monitor(protocol) -> None:
-    try:
-        protocol.action(
-            SIID_MONITOR, AIID_CAMERA_OPERATE,
-            [{"piid": PIID_MONITOR,
-              "value": json.dumps({"operType": "monitor", "operation": "end"},
-                                  separators=(",", ":"))}],
-        )
-    except Exception as err:  # noqa: BLE001
-        print(f"  (stop monitor failed: {err})")
+def camera_keep_alive(protocol, did: str, session: str) -> None:
+    """"Someone is still watching" - the device drops the session without it."""
+    camera_action(protocol, did, AIID_CAMERA_OPERATE, PIID_CAMERA_KEEP_ALIVE,
+                  {"operType": "keep_alive", "videoStatus": "opened", "session": session})
+
+
+def stop_live_view(protocol, did: str, session: str) -> None:
+    camera_action(protocol, did, AIID_CAMERA_OPERATE, PIID_MONITOR,
+                  {"operType": "monitor", "operation": "end", "session": session})
+
+
+def _summarise(resp) -> str:
+    if not resp:
+        return "no response"
+    result = (resp.get("data") or {}).get("result") or {}
+    return f"code={result.get('code')} out={result.get('out')}"
 
 
 def main() -> int:
@@ -208,24 +245,25 @@ def main() -> int:
     time.sleep(2)
     plain = snapshot("2-after-plain-rotate")
 
-    print("\n--- opening a monitor session")
-    ok, detail = start_monitor(protocol, pin)
-    print(f"    start_monitor ok={ok}: {detail}")
+    print("\n--- opening a live view session (full app sequence)")
+    session, channel = start_live_view(protocol, args.did, pin)
     time.sleep(3)
     monitoring = snapshot("3-monitor-open")
 
-    print(f"\n>>> ROTATING {args.degrees} degrees WITH the monitor session open.")
+    print(f"\n>>> ROTATING {args.degrees} degrees WITH the live view session open.")
     print(">>> WATCH THE ROBOT: do the brushes/mop run this time?")
+    camera_keep_alive(protocol, args.did, session)
     time.sleep(3)
     rotate(protocol, args.degrees, hold=args.hold)
+    camera_keep_alive(protocol, args.did, session)
     time.sleep(2)
     snapshot("4-after-monitor-rotate")
 
-    print("\n--- closing the monitor session")
-    stop_monitor(protocol)
+    print("\n--- closing the live view session")
+    stop_live_view(protocol, args.did, session)
 
     print("\n" + "=" * 60)
-    print("IDLE vs MONITOR OPEN - what the session changes:")
+    print("IDLE vs LIVE VIEW OPEN - what the session changes:")
     print("=" * 60)
     diff(idle, monitoring)
 
