@@ -72,10 +72,15 @@ def send_remote(protocol, rotation: int) -> None:
     protocol.set_property(SIID_VACUUM_EXTEND, PIID_REMOTE_STATE, payload, 1)
 
 
-def rotate(protocol, degrees: float) -> None:
-    """Hold the turn and release it, the way the live view does."""
+def rotate(protocol, degrees: float, hold: float | None = None) -> None:
+    """Hold the turn and release it, the way the live view does.
+
+    `hold` overrides the duration derived from the angle, so the same command
+    can be compared at different hold times - the one variable left between a
+    call that turns cleanly and one that starts vacuuming.
+    """
     rate = TURN_RATE_DPS if degrees > 0 else -TURN_RATE_DPS
-    duration = abs(degrees) / TURN_RATE_DPS
+    duration = hold if hold is not None else abs(degrees) / TURN_RATE_DPS
     send_remote(protocol, rate)
     deadline = time.monotonic() + duration
     while True:
@@ -143,6 +148,8 @@ def main() -> int:
     ap.add_argument("--degrees", type=float, default=40)
     ap.add_argument("--country", default="eu")
     ap.add_argument("--outdir", default=".", help="where to write snapshots")
+    ap.add_argument("--hold", type=float, help="seconds to hold the turn, overriding the angle")
+    ap.add_argument("--skip-monitor", action="store_true", help="just rotate once, no snapshots")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parents[2]
@@ -174,6 +181,18 @@ def main() -> int:
         return 1
     print("Connected to the device", file=sys.stderr)
 
+    if args.skip_monitor:
+        hold = args.hold if args.hold is not None else abs(args.degrees) / TURN_RATE_DPS
+        print(f"\n>>> Rotating: spdw {TURN_RATE_DPS} held for {hold:.2f}s. Watch the brushes.")
+        time.sleep(3)
+        rotate(protocol, args.degrees, hold=args.hold)
+        print(">>> Done.")
+        try:
+            protocol.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+        return 0
+
     def snapshot(name: str) -> dict:
         print(f"\n--- snapshot: {name}")
         data = collect(protocol, args.did)
@@ -185,7 +204,7 @@ def main() -> int:
     print(f"\n>>> ROTATING {args.degrees} degrees with NO monitor session.")
     print(">>> WATCH THE ROBOT: do the brushes/mop run?")
     time.sleep(3)
-    rotate(protocol, args.degrees)
+    rotate(protocol, args.degrees, hold=args.hold)
     time.sleep(2)
     plain = snapshot("2-after-plain-rotate")
 
@@ -198,7 +217,7 @@ def main() -> int:
     print(f"\n>>> ROTATING {args.degrees} degrees WITH the monitor session open.")
     print(">>> WATCH THE ROBOT: do the brushes/mop run this time?")
     time.sleep(3)
-    rotate(protocol, args.degrees)
+    rotate(protocol, args.degrees, hold=args.hold)
     time.sleep(2)
     snapshot("4-after-monitor-rotate")
 
