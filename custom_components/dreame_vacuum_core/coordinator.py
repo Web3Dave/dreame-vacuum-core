@@ -569,9 +569,16 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if pos.get("x") is not None:
                 distance = math.hypot(pos["x"] - x, pos["y"] - y)
                 if distance <= arrival_tolerance:
+                    _LOGGER.info(
+                        "%s arrived at (%s, %s), %dmm from target",
+                        self.device_name, pos["x"], pos["y"], distance,
+                    )
                     return
                 if closest is None or distance < closest:
                     closest = distance
+                _LOGGER.debug(
+                    "%s at (%s, %s), %dmm to go", self.device_name, pos["x"], pos["y"], distance
+                )
             await asyncio.sleep(3)
 
         raise HomeAssistantError(
