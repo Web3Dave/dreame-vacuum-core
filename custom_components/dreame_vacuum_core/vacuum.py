@@ -54,6 +54,7 @@ ATTR_HEADING = "heading"
 ATTR_TOLERANCE = "tolerance"
 ATTR_MAX_ATTEMPTS = "max_attempts"
 ATTR_DAMPING = "damping"
+ATTR_SETTLE = "settle"
 
 SERVICE_GO_TO_POINT = "go_to_point"
 ATTR_X = "x"
@@ -81,6 +82,9 @@ async def async_setup_entry(
             ),
             vol.Optional(ATTR_DAMPING, default=0.3): vol.All(
                 vol.Coerce(float), vol.Range(min=0.1, max=1)
+            ),
+            vol.Optional(ATTR_SETTLE, default=4): vol.All(
+                vol.Coerce(float), vol.Range(min=0, max=15)
             ),
         },
         "async_rotate_to_heading",
@@ -206,9 +210,14 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         tolerance: float = 1.0,
         max_attempts: int = 10,
         damping: float = 0.3,
+        settle: float = 4.0,
     ) -> None:
         await self.coordinator.async_rotate_to_heading(
-            heading, tolerance=tolerance, max_attempts=max_attempts, damping=damping
+            heading,
+            tolerance=tolerance,
+            max_attempts=max_attempts,
+            damping=damping,
+            settle=settle,
         )
 
     async def async_go_to_point(

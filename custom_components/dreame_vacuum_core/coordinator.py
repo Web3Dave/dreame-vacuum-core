@@ -613,6 +613,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         tolerance: float = 1.0,
         max_attempts: int = 10,
         damping: float = 0.3,
+        settle: float = 4.0,
     ) -> None:
         """Turn on the spot until the robot faces `heading`.
 
@@ -646,6 +647,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             if not await self.async_remote_control_step(rotation=step):
                 raise HomeAssistantError(f"{self.device_name} rejected the rotation command")
+
+            # The nudge is accepted immediately but the robot turns at its own
+            # pace. Measuring straight away reads a pose from part-way through
+            # the turn, so the next correction is computed against a heading
+            # the robot has already left - it chases itself and burns every
+            # attempt. Wait longer for bigger turns.
+            await asyncio.sleep(min(settle + abs(step) * 0.15, 20.0))
 
             measured = await self.async_refresh_position()
             if measured is None:
