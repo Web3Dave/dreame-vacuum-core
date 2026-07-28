@@ -5,13 +5,13 @@ command sent any other way vacuums as it goes. This runs the identical
 rotation three times, changing one thing at a time:
 
     1. plain - no live view
-    2. live view session open, suction and water at their minimum
+    2. live view session open - the only difference
 
 --delay controls the gap between opening the live view and moving, which is
 the variable currently under test.
 
-Suction and water are restored afterwards. Snapshots of every property are
-taken around each turn unless --no-snapshots is given.
+Snapshots of every property are taken around each turn unless
+--no-snapshots is given.
 
     python scripts/rotate_experiment.py --did 2089953038
 
@@ -283,34 +283,20 @@ def main() -> int:
     time.sleep(2)
     plain = snapshot("2-after-plain-rotate")
 
-    # --- turn 2: live view open, suction untouched --------------------
+    # --- turn 2: live view open, nothing else changed -----------------
     print("\n--- opening a live view session (full app sequence)")
     session, channel = start_live_view(protocol, args.did, pin)
     print(f"--- waiting {args.delay}s before moving")
     time.sleep(args.delay)
     monitoring = snapshot("3-live-view-open")
 
-    # --- turn 2: live view open, suction and water at minimum ---------
-    suction = read_prop(protocol, args.did, PIID_SUCTION)
-    water = read_prop(protocol, args.did, PIID_WATER)
-    print(f"\n--- turning suction {suction} -> {SUCTION_QUIET}, water {water} -> {WATER_LOW}")
-    set_prop(protocol, PIID_SUCTION, SUCTION_QUIET)
-    set_prop(protocol, PIID_WATER, WATER_LOW)
-    time.sleep(2)
-
+    # --- turn 2: live view open, nothing else changed -----------------
     camera_keep_alive(protocol, args.did, session)
-    announce("TURN 2: live view OPEN, suction and water at minimum")
+    announce("TURN 2: live view OPEN - nothing else changed")
     rotate(protocol, args.degrees, hold=args.hold)
     camera_keep_alive(protocol, args.did, session)
     time.sleep(2)
     snapshot("5-after-quiet-rotate")
-
-    # Put the settings back regardless of what happened above.
-    if suction is not None:
-        set_prop(protocol, PIID_SUCTION, suction)
-    if water is not None:
-        set_prop(protocol, PIID_WATER, water)
-    print(f"--- restored suction {suction}, water {water}")
 
     print("\n--- closing the live view session")
     stop_live_view(protocol, args.did, session)
