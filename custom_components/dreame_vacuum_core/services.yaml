@@ -125,3 +125,47 @@ go_to_point:
           min: 10
           max: 600
           unit_of_measurement: s
+
+remote_control:
+  name: Remote control (raw)
+  description: >-
+    Send a raw drive command, for testing and calibration. Mirrors the app's
+    live-view buttons: rotation is an angular velocity in degrees per second
+    and velocity is forward speed in mm/s - neither is a distance.
+  target:
+    entity:
+      integration: dreame_vacuum_core
+      domain: vacuum
+  fields:
+    rotation:
+      name: Rotation
+      description: >-
+        Angular velocity. The app's live view uses 45 / -45; its remote control
+        page uses 120 / -120. Zero stops turning.
+      default: 0
+      selector:
+        number:
+          min: -360
+          max: 360
+    velocity:
+      name: Velocity
+      description: >-
+        Forward speed in mm/s. The app uses 200 in the live view, 300 on the
+        remote page. Zero stops.
+      default: 0
+      selector:
+        number:
+          min: -400
+          max: 400
+    duration:
+      name: Duration
+      description: >-
+        Seconds to hold the command before sending a stop, resending at 1Hz as
+        the app does. Leave at 0 to send one command and leave it running -
+        the robot will keep going until you send zeros.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+          unit_of_measurement: s

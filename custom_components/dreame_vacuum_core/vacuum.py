@@ -91,6 +91,11 @@ ATTR_ARRIVAL_TOLERANCE = "arrival_tolerance"
 ATTR_TIMEOUT = "timeout"
 ATTR_HEADING_TOLERANCE = "heading_tolerance"
 
+SERVICE_REMOTE_CONTROL = "remote_control"
+ATTR_ROTATION = "rotation"
+ATTR_VELOCITY = "velocity"
+ATTR_DURATION = "duration"
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -136,6 +141,21 @@ async def async_setup_entry(
             ),
         },
         "async_go_to_point",
+    )
+    platform.async_register_entity_service(
+        SERVICE_REMOTE_CONTROL,
+        {
+            vol.Optional(ATTR_ROTATION, default=0): vol.All(
+                vol.Coerce(int), vol.Range(min=-360, max=360)
+            ),
+            vol.Optional(ATTR_VELOCITY, default=0): vol.All(
+                vol.Coerce(int), vol.Range(min=-400, max=400)
+            ),
+            vol.Optional(ATTR_DURATION, default=0): vol.All(
+                vol.Coerce(float), vol.Range(min=0, max=30)
+            ),
+        },
+        "async_remote_control",
     )
 
 
@@ -268,4 +288,11 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
             heading_tolerance=heading_tolerance,
             arrival_tolerance=arrival_tolerance,
             timeout=timeout,
+        )
+
+    async def async_remote_control(
+        self, rotation: int = 0, velocity: int = 0, duration: float = 0.0
+    ) -> None:
+        await self.coordinator.async_remote_control(
+            rotation=rotation, velocity=velocity, duration=duration
         )

@@ -535,6 +535,31 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Release. Without this the robot keeps turning.
         return await self.async_remote_control_step(rotation=0, velocity=0)
 
+    async def async_remote_control(
+        self, rotation: int = 0, velocity: int = 0, duration: float = 0.0
+    ) -> None:
+        """Raw remote control, for experimenting.
+
+        duration 0 sends a single command and leaves it running - the device
+        keeps going until something sends zero, exactly like holding the app's
+        button down. Any other duration holds it (resending at the app's 1Hz)
+        and then releases.
+        """
+        if not await self.async_remote_control_step(rotation=rotation, velocity=velocity):
+            raise HomeAssistantError(f"{self.device_name} rejected the remote control command")
+        if duration <= 0:
+            return
+
+        deadline = time.monotonic() + duration
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(REMOTE_REFRESH_SECONDS, remaining))
+            if remaining > REMOTE_REFRESH_SECONDS:
+                await self.async_remote_control_step(rotation=rotation, velocity=velocity)
+        await self.async_remote_control_step(rotation=0, velocity=0)
+
     async def async_remote_control_step(self, rotation: int = 0, velocity: int = 0) -> bool:
         """Raw remote-control command. rotation is deg/s, velocity mm/s."""
         ids = self.profile.prop_id("VacuumExtend", "PropRemoteState")
