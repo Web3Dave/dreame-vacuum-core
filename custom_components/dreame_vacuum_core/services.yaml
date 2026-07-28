@@ -58,6 +58,15 @@ rotate_to_heading:
           min: 0
           max: 15
           unit_of_measurement: s
+    quiet:
+      name: Quiet the vacuum
+      description: >-
+        Turn suction and water down to their minimum for the turn, then put
+        them back. The firmware treats remote driving as a cleaning mode, so
+        the brushes cannot be switched off outright - only turned down.
+      default: true
+      selector:
+        boolean:
 
 go_to_point:
   name: Go to point

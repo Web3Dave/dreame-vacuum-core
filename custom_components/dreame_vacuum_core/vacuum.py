@@ -21,7 +21,7 @@ from homeassistant.components.vacuum import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_platform
+from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -83,6 +83,7 @@ ATTR_TOLERANCE = "tolerance"
 ATTR_MAX_ATTEMPTS = "max_attempts"
 ATTR_DAMPING = "damping"
 ATTR_SETTLE = "settle"
+ATTR_QUIET = "quiet"
 
 SERVICE_GO_TO_POINT = "go_to_point"
 ATTR_X = "x"
@@ -120,6 +121,7 @@ async def async_setup_entry(
             vol.Optional(ATTR_SETTLE, default=4): vol.All(
                 vol.Coerce(float), vol.Range(min=0, max=15)
             ),
+            vol.Optional(ATTR_QUIET, default=True): cv.boolean,
         },
         "async_rotate_to_heading",
     )
@@ -263,6 +265,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         max_attempts: int = 10,
         damping: float = 0.3,
         settle: float = 4.0,
+        quiet: bool = True,
     ) -> None:
         await self.coordinator.async_rotate_to_heading(
             heading,
@@ -270,6 +273,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
             max_attempts=max_attempts,
             damping=damping,
             settle=settle,
+            quiet=quiet,
         )
 
     async def async_go_to_point(

@@ -80,6 +80,22 @@ TURN_RATE_DPS = 45
 # brushes and mop back on mid-turn.
 REMOTE_REFRESH_SECONDS = 1.0
 
+# Commands shorter than this are too brief for the device to act on cleanly,
+# so small corrections turn slower rather than for an unusably short time.
+MIN_TURN_SECONDS = 0.6
+
+# Lowest settings the device offers. Driving under remote control is a
+# cleaning mode as far as the firmware is concerned - Dreame document it as
+# "Remote Control Cleaning" - so the brushes cannot be switched off outright,
+# only turned down. Despite the generated names, siid 4 piid 4 is the suction
+# level and piid 5 is the water volume.
+SUCTION_QUIET = 0
+WATER_LOW = 1
+QUIET_PROPERTIES = (
+    ("VacuumExtend", "PropCleaningMode", SUCTION_QUIET),
+    ("VacuumExtend", "PropMopMode", WATER_LOW),
+)
+
 # Work modes that mean "no task is running". Seeing one of these while still
 # short of the target means the device abandoned the trip rather than that it
 # is still on its way. Values mirror vacuum.py's status constants.
@@ -503,6 +519,32 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._position_at = time.monotonic()
         return True
 
+    async def _async_quieten(self) -> dict:
+        """Turn suction and water down, returning what they were."""
+        previous: dict[tuple[str, str], Any] = {}
+        for service, prop, quiet in QUIET_PROPERTIES:
+            current = self.value(service, prop)
+            if current is None:
+                continue
+            try:
+                if int(current) == quiet:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if await self.async_set(service, prop, quiet):
+                previous[(service, prop)] = current
+        if previous:
+            _LOGGER.debug("Turned %s down for rotation: %s", self.device_name, previous)
+        return previous
+
+    async def _async_restore(self, previous: dict) -> None:
+        """Put suction and water back. Runs even when the rotation failed."""
+        for (service, prop), value in previous.items():
+            if not await self.async_set(service, prop, value):
+                _LOGGER.warning(
+                    "Could not restore %s.%s to %s on %s", service, prop, value, self.device_name
+                )
+
     async def async_turn_degrees(self, degrees: float) -> bool:
         """Turn roughly this many degrees, then stop.
 
@@ -514,8 +556,16 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not degrees:
             return True
 
-        rate = TURN_RATE_DPS if degrees > 0 else -TURN_RATE_DPS
-        duration = min(abs(degrees) / TURN_RATE_DPS, 10.0)
+        # Keep the angle but stretch the time for small corrections: a 3
+        # degree turn at the app's 45 deg/s lasts 0.07s, which is shorter than
+        # the round trip that carries it.
+        magnitude = TURN_RATE_DPS
+        duration = abs(degrees) / TURN_RATE_DPS
+        if duration < MIN_TURN_SECONDS:
+            duration = MIN_TURN_SECONDS
+            magnitude = max(abs(degrees) / MIN_TURN_SECONDS, 5)
+        duration = min(duration, 10.0)
+        rate = int(magnitude) if degrees > 0 else -int(magnitude)
 
         if not await self.async_remote_control_step(rotation=rate):
             return False
@@ -632,8 +682,28 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Vacuum.StopSweeping - despite the name the latter is pause, and
             # a paused mopping task sends the robot back to wash.
             await self.async_action("VacuumExtend", "stopClean")
-            await asyncio.sleep(3)
+            await self._async_wait_until_idle()
             await self.async_rotate_to_heading(heading, tolerance=heading_tolerance)
+
+    async def _async_wait_until_idle(self, timeout: float = 30.0) -> None:
+        """Block until no task is running.
+
+        Rotating while the cruise task is still winding down folds the drive
+        command into that task, and the device starts cleaning. A fixed sleep
+        was not enough - how long the task takes to end varies.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            await self.async_request_refresh()
+            mode = self.value("VacuumExtend", "PropWorkMode")
+            if mode in TASK_ENDED_MODES:
+                return
+            await asyncio.sleep(2)
+        _LOGGER.warning(
+            "%s still reports work_mode %s after being told to stop; rotating anyway",
+            self.device_name,
+            self.value("VacuumExtend", "PropWorkMode"),
+        )
 
     async def _async_wait_until_arrived(
         self, x: int, y: int, arrival_tolerance: int, timeout: float
@@ -699,6 +769,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         max_attempts: int = 10,
         damping: float = 0.3,
         settle: float = 4.0,
+        quiet: bool = True,
     ) -> None:
         """Turn on the spot until the robot faces `heading`.
 
@@ -715,6 +786,23 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Enable debug logging for dreame_vacuum_core for the details."
             )
 
+        previous = await self._async_quieten() if quiet else {}
+        try:
+            await self._async_rotate_loop(heading, current, tolerance, max_attempts, damping, settle)
+        finally:
+            # Restore even if the rotation raised, or a failed turn would
+            # silently leave the vacuum on its quietest setting.
+            await self._async_restore(previous)
+
+    async def _async_rotate_loop(
+        self,
+        heading: float,
+        current: float,
+        tolerance: float,
+        max_attempts: int,
+        damping: float,
+        settle: float,
+    ) -> None:
         for _ in range(int(max_attempts)):
             # Shortest signed turn, so it never takes the long way round.
             diff = (heading - current) % 360
