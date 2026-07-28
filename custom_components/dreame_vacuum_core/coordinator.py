@@ -69,6 +69,11 @@ _LOGGER = logging.getLogger(__name__)
 # as "start a cleaning task of this kind", not as a movement command.
 CRUISE_POINT_MODE = 23
 
+# Work modes that mean "no task is running". Seeing one of these while still
+# short of the target means the device abandoned the trip rather than that it
+# is still on its way. Values mirror vacuum.py's status constants.
+TASK_ENDED_MODES = {0, 6, 14, 17}
+
 # Properties we try to read every cycle, expressed in vocabulary terms so the
 # numeric ids come from the generated profile rather than being hardcoded.
 CORE_PROPERTIES: list[tuple[str, str]] = [
@@ -558,6 +563,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         closest: float | None = None
 
         ticks = 0
+        idle_polls = 0
         while time.monotonic() < deadline:
             await self.hass.async_add_executor_job(self._read_map_frame)
             # Frames arrive by push while the robot drives, but nudge the
@@ -578,6 +584,21 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     closest = distance
                 _LOGGER.debug(
                     "%s at (%s, %s), %dmm to go", self.device_name, pos["x"], pos["y"], distance
+                )
+
+            # The device gives up quietly - an unreachable or off-map target
+            # ends the task and it just sits there. Waiting out the full
+            # timeout tells the user nothing, so fail as soon as it has
+            # clearly stopped trying.
+            mode = self.value("VacuumExtend", "PropWorkMode")
+            idle_polls = idle_polls + 1 if mode in TASK_ENDED_MODES else 0
+            if idle_polls >= 2:
+                fault = self.value("Vacuum", "PropVacuumFault")
+                raise HomeAssistantError(
+                    f"{self.device_name} stopped without reaching ({x}, {y}) - "
+                    f"work_mode {mode}, fault {fault}"
+                    + (f", {int(closest)}mm away" if closest is not None else "")
+                    + ". The target may be outside the current map."
                 )
             await asyncio.sleep(3)
 
