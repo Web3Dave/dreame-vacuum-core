@@ -2,7 +2,7 @@
 
 Owns the config UI, device discovery, and entities for streaming/snapshotting your
 Dreame vacuum's onboard camera. Requires the companion
-[Dreame Vacuum Camera Capture add-on](https://github.com/Web3Dave/dreame-vacuum-video-capture)
+[Dreame Vacuum Camera Capture add-on](https://github.com/Web3Dave/dreame-vacuum-companion)
 to actually be installed and running first - this integration has no copy of the
 reverse-engineered Dreame/XP2P pipeline itself, it just drives the add-on's API.
 
@@ -27,7 +27,7 @@ else's vacuum or account.
 
 ## Installation
 
-1. Install and start the [add-on](https://github.com/Web3Dave/dreame-vacuum-video-capture)
+1. Install and start the [add-on](https://github.com/Web3Dave/dreame-vacuum-companion)
    first, and set an `api_token` (any random string) in its Configuration tab.
 2. Copy `custom_components/dreame_camera_capture/` into your Home Assistant's
    `config/custom_components/` directory (or add this repo via HACS as a custom
