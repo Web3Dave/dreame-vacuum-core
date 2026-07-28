@@ -776,6 +776,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         damping: float = 0.3,
         settle: float = 4.0,
         quiet: bool = True,
+        camera_settle: float | None = None,
     ) -> None:
         """Turn on the spot until the robot faces `heading`.
 
@@ -794,7 +795,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # A camera session stops the firmware promoting the drive into a
         # remote-control cleaning task, which is what runs the brushes.
-        camera = await self._async_open_camera_session()
+        camera = await self._async_open_camera_session(camera_settle)
         previous = await self._async_quieten() if quiet and not camera else {}
         try:
             await self._async_rotate_loop(
@@ -807,7 +808,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if camera:
                 await self.hass.async_add_executor_job(camera.stop)
 
-    async def _async_open_camera_session(self) -> CameraSession | None:
+    async def _async_open_camera_session(self, settle: float | None = None) -> CameraSession | None:
         """Open a video-less camera session, or None if we cannot.
 
         Optional on purpose: the PIN is only configured when the camera is set
@@ -815,25 +816,36 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         pin = (self.config.get(CONF_CAMERA_PIN) or "").strip()
         if not pin:
-            if not self._warned_no_pin:
-                _LOGGER.warning(
-                    "No camera PIN configured for %s, so rotation will run the brushes. "
-                    "Add the PIN in the integration options for a quiet turn",
-                    self.device_name,
-                )
-                self._warned_no_pin = True
+            # Logged every time rather than once: a silent fallback to a noisy
+            # turn is exactly the thing that is hard to diagnose from outside.
+            _LOGGER.warning(
+                "No camera PIN configured for %s - rotating without a camera session, "
+                "so the brushes will run. Set the PIN in the integration's options "
+                "(Settings > Devices & Services > Dreame Vacuum Core > Configure)",
+                self.device_name,
+            )
             return None
 
         session = CameraSession(self._protocol, self.did, pin)
         try:
             started = await self.hass.async_add_executor_job(session.start)
         except Exception as err:  # noqa: BLE001 - a noisy turn beats no turn
-            _LOGGER.warning("Could not open a camera session for %s: %s", self.device_name, err)
+            _LOGGER.warning(
+                "Could not open a camera session for %s, so the brushes will run: %s",
+                self.device_name, err,
+            )
             return None
         if not started:
+            _LOGGER.warning(
+                "%s refused the camera session, so the brushes will run. "
+                "Check the camera PIN is correct", self.device_name,
+            )
             return None
 
-        await asyncio.sleep(CAMERA_SETTLE_SECONDS)
+        wait = CAMERA_SETTLE_SECONDS if settle is None else settle
+        _LOGGER.info("Camera session open for %s, settling %.1fs before turning",
+                     self.device_name, wait)
+        await asyncio.sleep(wait)
         return session
 
     async def _async_rotate_loop(

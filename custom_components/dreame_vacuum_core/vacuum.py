@@ -170,6 +170,7 @@ ATTR_MAX_ATTEMPTS = "max_attempts"
 ATTR_DAMPING = "damping"
 ATTR_SETTLE = "settle"
 ATTR_QUIET = "quiet"
+ATTR_CAMERA_SETTLE = "camera_settle"
 
 SERVICE_GO_TO_POINT = "go_to_point"
 ATTR_X = "x"
@@ -217,6 +218,9 @@ async def async_setup_entry(
                 vol.Coerce(float), vol.Range(min=0, max=15)
             ),
             vol.Optional(ATTR_QUIET, default=True): cv.boolean,
+            vol.Optional(ATTR_CAMERA_SETTLE): vol.All(
+                vol.Coerce(float), vol.Range(min=0, max=20)
+            ),
         },
         "async_rotate_to_heading",
     )
@@ -361,6 +365,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         damping: float = 0.3,
         settle: float = 4.0,
         quiet: bool = True,
+        camera_settle: float | None = None,
     ) -> None:
         await self.coordinator.async_rotate_to_heading(
             heading,
@@ -369,6 +374,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
             damping=damping,
             settle=settle,
             quiet=quiet,
+            camera_settle=camera_settle,
         )
 
     async def async_go_to_point(
