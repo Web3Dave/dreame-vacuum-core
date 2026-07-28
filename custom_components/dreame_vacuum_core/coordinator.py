@@ -355,6 +355,82 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return "The last frame is stale and no newer one arrived."
 
     def _read_map_frame(self) -> bool:
+        """Blocking. Get a map frame by whichever route this device uses.
+
+        Two routes exist. Local/miio devices put the frame straight in the map
+        property. Dreame-cloud devices leave that property empty and instead
+        publish an object name pointing at a file in cloud storage, which has
+        to be fetched over HTTP.
+        """
+        return self._read_map_property() or self._read_map_from_cloud()
+
+    def _read_map_from_cloud(self) -> bool:
+        """Blocking. Resolve the current object name and download the frame."""
+        ids = self.profile.prop_id("CleanMap", "PropObjectName")
+        if ids is None or self._protocol is None:
+            return False
+
+        try:
+            result = self._protocol.get_properties(
+                [{"did": self.did, "siid": ids[0], "piid": ids[1]}]
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Object name read failed: %s", err)
+            return False
+
+        if not (isinstance(result, list) and result and result[0].get("code") == 0):
+            return False
+
+        object_name = self._first_object_name(result[0].get("value"))
+        if not object_name:
+            _LOGGER.debug("No map object name available yet")
+            return False
+
+        try:
+            # Interim first: that's the live map. The permanent url is for
+            # saved maps and lags behind the robot's current position.
+            url = self._protocol.cloud.get_interim_file_url(
+                object_name
+            ) or self._protocol.cloud.get_file_url(object_name)
+            if not url:
+                _LOGGER.debug("No download url for map object %s", object_name)
+                return False
+            raw = self._protocol.cloud.get_file(url)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Map download failed: %s", err)
+            return False
+
+        if not raw:
+            return False
+
+        position = decode_position(
+            raw.decode() if isinstance(raw, bytes) else str(raw),
+            self.profile.flag("AES_IV"),
+        )
+        if position is None:
+            _LOGGER.warning("Downloaded a map for %s but could not decode it", self.device_name)
+            return False
+
+        self.position = position
+        self._position_at = time.monotonic()
+        return True
+
+    @staticmethod
+    def _first_object_name(value: Any) -> str | None:
+        """The property carries a list of names, sometimes JSON-encoded."""
+        if isinstance(value, list):
+            return str(value[0]) if value else None
+        if isinstance(value, str) and value:
+            if value.startswith("["):
+                try:
+                    decoded = json.loads(value)
+                    return str(decoded[0]) if decoded else None
+                except (ValueError, IndexError):
+                    return None
+            return value
+        return None
+
+    def _read_map_property(self) -> bool:
         """Blocking. Fetch and decode the map property, updating self.position."""
         if self._map_ids is None or self._protocol is None:
             return False
@@ -376,7 +452,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         raw = item.get("value")
         if not isinstance(raw, str) or not raw:
-            _LOGGER.debug("Map property is empty - the map may live in cloud storage")
+            _LOGGER.debug("Map property is empty - trying cloud storage instead")
             return False
 
         position = decode_position(raw, self.profile.flag("AES_IV"))
