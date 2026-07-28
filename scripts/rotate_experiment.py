@@ -4,9 +4,11 @@ Driving from the app's live view turns without running the brushes; the same
 command sent any other way vacuums as it goes. This runs the identical
 rotation three times, changing one thing at a time:
 
-    1. plain - no live view, suction as-is
-    2. live view session open, suction as-is
-    3. live view session open, suction and water at their minimum
+    1. plain - no live view
+    2. live view session open, suction and water at their minimum
+
+--delay controls the gap between opening the live view and moving, which is
+the variable currently under test.
 
 Suction and water are restored afterwards. Snapshots of every property are
 taken around each turn unless --no-snapshots is given.
@@ -213,6 +215,8 @@ def main() -> int:
                     help="skip the property dumps - much faster, purely observational")
     ap.add_argument("--pause", action="store_true",
                     help="wait for Enter before each turn so you can be watching")
+    ap.add_argument("--delay", type=float, default=3,
+                    help="seconds between opening the live view and turning")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parents[2]
@@ -264,21 +268,17 @@ def main() -> int:
         (outdir / f"{name}.json").write_text(json.dumps(data, indent=2, sort_keys=True))
         return data
 
-    def countdown(label: str) -> None:
+    def announce(label: str) -> None:
         hold = args.hold if args.hold is not None else abs(args.degrees) / TURN_RATE_DPS
         print(f"\n>>> {label}")
         print(f">>> {args.degrees:.0f} degrees = {hold:.1f}s of turning. Watch the brushes.")
         if args.pause:
-            input(">>> Press Enter when you are watching the robot... ")
-        for n in (3, 2, 1):
-            print(f"    {n}...", flush=True)
-            time.sleep(1)
-        print("    TURNING NOW", flush=True)
+            input(">>> Press Enter to turn... ")
 
     idle = snapshot("1-idle")
 
     # --- turn 1: nothing special -------------------------------------
-    countdown("TURN 1 of 3: plain - no live view, normal suction")
+    announce("TURN 1: plain - no live view")
     rotate(protocol, args.degrees, hold=args.hold)
     time.sleep(2)
     plain = snapshot("2-after-plain-rotate")
@@ -286,17 +286,11 @@ def main() -> int:
     # --- turn 2: live view open, suction untouched --------------------
     print("\n--- opening a live view session (full app sequence)")
     session, channel = start_live_view(protocol, args.did, pin)
-    time.sleep(3)
+    print(f"--- waiting {args.delay}s before moving")
+    time.sleep(args.delay)
     monitoring = snapshot("3-live-view-open")
 
-    camera_keep_alive(protocol, args.did, session)
-    countdown("TURN 2 of 3: live view OPEN, normal suction")
-    rotate(protocol, args.degrees, hold=args.hold)
-    camera_keep_alive(protocol, args.did, session)
-    time.sleep(2)
-    snapshot("4-after-live-view-rotate")
-
-    # --- turn 3: live view open, suction and water at minimum ---------
+    # --- turn 2: live view open, suction and water at minimum ---------
     suction = read_prop(protocol, args.did, PIID_SUCTION)
     water = read_prop(protocol, args.did, PIID_WATER)
     print(f"\n--- turning suction {suction} -> {SUCTION_QUIET}, water {water} -> {WATER_LOW}")
@@ -305,7 +299,7 @@ def main() -> int:
     time.sleep(2)
 
     camera_keep_alive(protocol, args.did, session)
-    countdown("TURN 3 of 3: live view OPEN, suction and water at minimum")
+    announce("TURN 2: live view OPEN, suction and water at minimum")
     rotate(protocol, args.degrees, hold=args.hold)
     camera_keep_alive(protocol, args.did, session)
     time.sleep(2)
