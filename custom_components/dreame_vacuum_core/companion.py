@@ -107,6 +107,18 @@ class CompanionClient:
 
     async def async_stream_status(self, did: str) -> bool | None:
         """True/False if known, None if the add-on couldn't be reached."""
+        state = await self.async_stream_state(did)
+        return None if state is None else bool(state.get("running"))
+
+    async def async_stream_url(self, did: str) -> str | None:
+        """The RTSP url of an already-running stream, or None.
+
+        Read-only on purpose: it never starts a session.
+        """
+        state = await self.async_stream_state(did)
+        return (state or {}).get("rtsp_url")
+
+    async def async_stream_state(self, did: str) -> dict | None:
         try:
             async with self._session.get(
                 f"{self._base}/stream/status",
@@ -122,7 +134,7 @@ class CompanionClient:
                     )
                     return None
                 self._warned = False
-                return bool((await resp.json()).get("running"))
+                return await resp.json()
         except (aiohttp.ClientError, TimeoutError) as err:
             if not self._warned:
                 _LOGGER.warning("Companion add-on unreachable at %s: %s", self._base, err)

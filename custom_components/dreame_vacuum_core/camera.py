@@ -1,9 +1,9 @@
 """Camera entity backed by the companion add-on.
 
-`async_camera_image` only serves whatever snapshot the add-on already has, so
-rendering a thumbnail never triggers a device-side stream. `stream_source` is
-what actually starts one - Home Assistant calls it lazily when someone opens
-the live view, and the add-on keeps the feed alive from there.
+Read-only, by design. `async_camera_image` serves whatever snapshot the add-on
+already has and `stream_source` attaches to a stream only if one is already
+running, so nothing here can open a camera session on the vacuum. Starting one
+is always an explicit act: the Stream switch, or the snapshot button.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_CAMERA_PIN, CONF_COUNTRY, CONF_PASSWORD, CONF_USERNAME, DOMAIN
+from .const import DOMAIN
 from .coordinator import DreameCoordinator
 from .entity import DreameEntity
 
@@ -42,12 +42,15 @@ class DreameCamera(DreameEntity, Camera):
         return await self.coordinator.companion.async_latest_image(self.coordinator.did)
 
     async def stream_source(self) -> str | None:
-        c = self.coordinator
-        data = c.config
-        return await c.companion.async_stream_start(
-            data[CONF_USERNAME],
-            data[CONF_PASSWORD],
-            data.get(CONF_COUNTRY, "eu"),
-            data.get(CONF_CAMERA_PIN, ""),
-            c.did,
-        )
+        """Attach to a running stream. Never starts one.
+
+        Home Assistant calls this whenever it wants the feed - opening the
+        live view, rendering a dashboard card, camera.record, a WebRTC
+        negotiation - none of which is an explicit request to point the camera
+        at your house. Starting a session here also meant the vacuum could be
+        occupied for `stream_timeout_minutes` after a card scrolled past,
+        locking the phone app out.
+
+        The Stream switch is the only thing that opens a session.
+        """
+        return await self.coordinator.companion.async_stream_url(self.coordinator.did)

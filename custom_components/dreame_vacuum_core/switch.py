@@ -91,3 +91,11 @@ class DreameStreamSwitch(DreameEntity, SwitchEntity):
         if await self.coordinator.companion.async_stream_stop(self.coordinator.did):
             self._running = False
             self.async_write_ha_state()
+        else:
+            # Silence here is what makes this look like "the toggle springs
+            # back on by itself": HA re-reads the state after the call and
+            # finds the stream still running, with nothing in the log.
+            _LOGGER.warning(
+                "Could not stop the stream for %s - the add-on did not confirm it",
+                self.coordinator.device_name,
+            )
