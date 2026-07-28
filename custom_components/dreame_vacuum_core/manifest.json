@@ -1,0 +1,12 @@
+{
+  "domain": "dreame_vacuum_core",
+  "name": "Dreame Vacuum Core",
+  "version": "0.1.0",
+  "documentation": "https://github.com/Web3Dave/dreame-vacuum-capture-integration",
+  "issue_tracker": "https://github.com/Web3Dave/dreame-vacuum-capture-integration/issues",
+  "codeowners": ["@Web3Dave"],
+  "requirements": ["paho-mqtt", "pycryptodome"],
+  "config_flow": true,
+  "iot_class": "cloud_push",
+  "integration_type": "hub"
+}

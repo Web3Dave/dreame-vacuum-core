@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dreame account",
+        "description": "Sign in with the same account you use in the Dreamehome app.",
+        "data": {
+          "username": "Username or email",
+          "password": "Password",
+          "country": "Account region"
+        }
+      },
+      "device": {
+        "title": "Select device",
+        "description": "Found {count} device(s) on this account.",
+        "data": { "did": "Device" }
+      },
+      "camera": {
+        "title": "Camera (optional)",
+        "description": "Camera streaming is handled by the Dreame Vacuum Companion add-on, which is x86_64-only. Leave the token blank to skip - the vacuum works without it.\n\nModel: {model} (capability profile shipped: {profile}; {known_models} model(s) known)",
+        "data": {
+          "companion_host": "Companion host",
+          "companion_port": "Companion port",
+          "companion_token": "Companion API token",
+          "camera_pin": "Camera privacy PIN"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Could not sign in - check the username, password and region",
+      "no_devices": "No devices found on this account",
+      "cannot_connect": "Could not reach Dreame's servers",
+      "companion_unreachable": "Could not reach the companion add-on - check host, port and token"
+    },
+    "abort": {
+      "already_configured": "This device is already set up"
+    }
+  }
+}
