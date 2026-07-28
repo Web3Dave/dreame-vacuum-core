@@ -27,7 +27,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PLUGINS = REPO_ROOT / "plugins"
-DEFAULT_DOMAIN_DIR = REPO_ROOT / "custom_components" / "dreame_camera_capture"
+DEFAULT_DOMAIN_DIR = REPO_ROOT / "custom_components" / "dreame_vacuum_core"
 
 GENERATOR_VERSION = 1
 

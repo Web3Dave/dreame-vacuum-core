@@ -70,7 +70,7 @@ model resource package is byte-identical for both.
 ## Output
 
 ```
-custom_components/dreame_camera_capture/profiles/
+custom_components/dreame_vacuum_core/profiles/
   _services.json              siid -> service, aiid names, piid maps
   dreame.vacuum.r2579h.json   125 capability flags + provenance
   dreame.vacuum.r2338a.json    97 capability flags + provenance
