@@ -284,21 +284,82 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_refresh_position(self, timeout: float = 8.0) -> float | None:
         """Force a map frame and wait for the pose it carries.
 
-        Returns the heading in degrees, or None if no *fresh* frame arrived.
-        Staleness matters here: reusing the previous frame's heading after a
-        rotation step would make the loop think the robot hadn't moved and
-        send the same correction again.
+        Returns the heading in degrees, or None if no fresh frame could be
+        obtained. Staleness matters here: reusing the previous frame's heading
+        after a rotation step would make the loop think the robot hadn't moved
+        and send the same correction again.
         """
         before = (self.position or {}).get("frame_id")
         await self.async_request_map()
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            pos = self.position
-            if pos and pos.get("frame_id") != before and pos.get("angle") is not None:
-                return float(pos["angle"])
-            await asyncio.sleep(0.3)
+            # Read the property directly rather than only waiting for a push.
+            # Frames are pushed while the robot is moving, so a stationary
+            # robot may never send one - which is exactly the state it is in
+            # when you want to rotate it. A direct read is fresh by
+            # definition, so it needs no frame_id comparison.
+            if await self.hass.async_add_executor_job(self._read_map_frame):
+                angle = (self.position or {}).get("angle")
+                if angle is not None:
+                    return float(angle)
+            else:
+                # Fall back to a pushed frame, but only a new one.
+                pos = self.position
+                if pos and pos.get("frame_id") != before and pos.get("angle") is not None:
+                    return float(pos["angle"])
+            await asyncio.sleep(0.5)
         return None
+
+    def _position_diagnosis(self) -> str:
+        """A specific reason rather than a generic failure.
+
+        There are several distinct causes and they need different fixes, so
+        guessing "not localised" at the user is unhelpful.
+        """
+        if self._map_ids is None:
+            return "This model's profile has no map property, so position is unavailable."
+        if self.position is None:
+            return "No map frame has ever been decoded for this vacuum."
+        if self.position.get("angle") is None:
+            return "The vacuum sent a map frame but could not place itself on the map."
+        return "The last frame is stale and no newer one arrived."
+
+    def _read_map_frame(self) -> bool:
+        """Blocking. Fetch and decode the map property, updating self.position."""
+        if self._map_ids is None or self._protocol is None:
+            return False
+        siid, piid = self._map_ids
+        try:
+            result = self._protocol.get_properties(
+                [{"did": self.did, "siid": siid, "piid": piid}]
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Map property read failed: %s", err)
+            return False
+
+        if not (isinstance(result, list) and result):
+            return False
+        item = result[0]
+        if item.get("code") != 0:
+            _LOGGER.debug("Map property unavailable: code=%s", item.get("code"))
+            return False
+
+        raw = item.get("value")
+        if not isinstance(raw, str) or not raw:
+            _LOGGER.debug("Map property is empty - the map may live in cloud storage")
+            return False
+
+        position = decode_position(raw, self.profile.flag("AES_IV"))
+        if position is None:
+            _LOGGER.warning(
+                "Could not decode a map frame for %s (%d chars) - position is unavailable",
+                self.device_name,
+                len(raw),
+            )
+            return False
+        self.position = position
+        return True
 
     async def async_remote_control_step(self, rotation: int = 0, velocity: int = 0) -> bool:
         """One remote-control nudge. rotation is degrees, velocity mm/s."""
@@ -339,7 +400,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current = await self.async_refresh_position()
         if current is None:
             raise HomeAssistantError(
-                f"{self.device_name} did not report its position - it may not be localised"
+                f"Could not read {self.device_name}'s heading. "
+                f"{self._position_diagnosis()} "
+                "Enable debug logging for dreame_vacuum_core for the details."
             )
 
         for _ in range(int(max_attempts)):
