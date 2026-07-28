@@ -69,15 +69,16 @@ _LOGGER = logging.getLogger(__name__)
 # as "start a cleaning task of this kind", not as a movement command.
 CRUISE_POINT_MODE = 23
 
-# Remote control, from the app's WorkMode enum. The live-view turn buttons put
-# the device in this mode before driving it; without it the device treats the
-# motion as part of a cleaning task and runs the brushes and mop.
-REMOTE_CONTROL_MODE = 13
-
 # spdw is an angular velocity, not an angle. The app's live view sends a fixed
 # +/-45 while the button is held and 0 on release - so a turn is "start
 # spinning, wait, stop", not "rotate by N degrees".
 TURN_RATE_DPS = 45
+
+# The app resends the command every second for as long as the button is held.
+# The device treats remote control as a lease: stop refreshing it and the
+# device falls back to whatever task it was in, which is what brings the
+# brushes and mop back on mid-turn.
+REMOTE_REFRESH_SECONDS = 1.0
 
 # Work modes that mean "no task is running". Seeing one of these while still
 # short of the target means the device abandoned the trip rather than that it
@@ -513,14 +514,25 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not degrees:
             return True
 
-        # Entering remote control mode is what stops the device treating this
-        # as cleaning and spinning up the brushes and mop.
-        await self.async_set("VacuumExtend", "PropWorkMode", REMOTE_CONTROL_MODE)
-
         rate = TURN_RATE_DPS if degrees > 0 else -TURN_RATE_DPS
+        duration = min(abs(degrees) / TURN_RATE_DPS, 10.0)
+
         if not await self.async_remote_control_step(rotation=rate):
             return False
-        await asyncio.sleep(min(abs(degrees) / TURN_RATE_DPS, 10.0))
+
+        # Hold the turn by resending, exactly as the app does while the button
+        # is held down. A single command left the lease to expire part way
+        # through the turn.
+        deadline = time.monotonic() + duration
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(REMOTE_REFRESH_SECONDS, remaining))
+            if remaining > REMOTE_REFRESH_SECONDS:
+                await self.async_remote_control_step(rotation=rate)
+
+        # Release. Without this the robot keeps turning.
         return await self.async_remote_control_step(rotation=0, velocity=0)
 
     async def async_remote_control_step(self, rotation: int = 0, velocity: int = 0) -> bool:
