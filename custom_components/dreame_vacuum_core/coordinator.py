@@ -69,6 +69,16 @@ _LOGGER = logging.getLogger(__name__)
 # as "start a cleaning task of this kind", not as a movement command.
 CRUISE_POINT_MODE = 23
 
+# Remote control, from the app's WorkMode enum. The live-view turn buttons put
+# the device in this mode before driving it; without it the device treats the
+# motion as part of a cleaning task and runs the brushes and mop.
+REMOTE_CONTROL_MODE = 13
+
+# spdw is an angular velocity, not an angle. The app's live view sends a fixed
+# +/-45 while the button is held and 0 on release - so a turn is "start
+# spinning, wait, stop", not "rotate by N degrees".
+TURN_RATE_DPS = 45
+
 # Work modes that mean "no task is running". Seeing one of these while still
 # short of the target means the device abandoned the trip rather than that it
 # is still on its way. Values mirror vacuum.py's status constants.
@@ -479,8 +489,29 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._position_at = time.monotonic()
         return True
 
+    async def async_turn_degrees(self, degrees: float) -> bool:
+        """Turn roughly this many degrees, then stop.
+
+        The device has no "turn by N" command. spdw sets a rate, so this holds
+        the turn for as long as the angle needs and then explicitly sends zero
+        - the same press-and-release the app's live view performs. Without the
+        release the robot simply keeps spinning.
+        """
+        if not degrees:
+            return True
+
+        # Entering remote control mode is what stops the device treating this
+        # as cleaning and spinning up the brushes and mop.
+        await self.async_set("VacuumExtend", "PropWorkMode", REMOTE_CONTROL_MODE)
+
+        rate = TURN_RATE_DPS if degrees > 0 else -TURN_RATE_DPS
+        if not await self.async_remote_control_step(rotation=rate):
+            return False
+        await asyncio.sleep(min(abs(degrees) / TURN_RATE_DPS, 10.0))
+        return await self.async_remote_control_step(rotation=0, velocity=0)
+
     async def async_remote_control_step(self, rotation: int = 0, velocity: int = 0) -> bool:
-        """One remote-control nudge. rotation is degrees, velocity mm/s."""
+        """Raw remote-control command. rotation is deg/s, velocity mm/s."""
         ids = self.profile.prop_id("VacuumExtend", "PropRemoteState")
         if ids is None:
             return False
@@ -491,7 +522,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "audio": "false",
                 # The device ignores a command identical to the last one; the
                 # nonce is what makes repeated equal steps take effect.
-                "random": random.randrange(65535),
+                "random": random.randrange(1000),
+                "timestamp": int(time.time() * 1000),
             },
             separators=(",", ":"),
         )
@@ -642,13 +674,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if abs(diff) <= tolerance:
                 return
 
-            step = int(round(diff * damping))
-            if step == 0:
-                # Damping rounds sub-degree corrections to nothing, which would
+            step = diff * damping
+            if abs(step) < 1:
+                # Damping shrinks the last corrections to nothing, which would
                 # burn every remaining attempt without moving.
                 step = 1 if diff > 0 else -1
 
-            if not await self.async_remote_control_step(rotation=step):
+            if not await self.async_turn_degrees(step):
                 raise HomeAssistantError(f"{self.device_name} rejected the rotation command")
 
             # The nudge is accepted immediately but the robot turns at its own

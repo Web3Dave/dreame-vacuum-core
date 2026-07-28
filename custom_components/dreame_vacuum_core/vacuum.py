@@ -30,22 +30,49 @@ from .entity import DreameEntity
 
 _LOGGER = logging.getLogger(__name__)
 
-# Values from the device's own status enum.
+# The device's WorkMode enum, taken verbatim from the app's own plugin bundle
+# rather than inferred from observed values.
 STATUS_IDLE = 0
-STATUS_PAUSED = 1
-STATUS_CLEANING = 2
+STATUS_PAUSED = 1            # PauseAndStopMode
+STATUS_AUTO_CLEAN = 2
 STATUS_BACK_HOME = 3
-STATUS_PARTIAL_CLEANING = 4
+STATUS_PART_CLEAN = 4
+STATUS_FOLLOW_WALL = 5
 STATUS_CHARGING = 6
-STATUS_ERROR = 12
+STATUS_OTA = 7
+STATUS_ERROR = 12            # ErrRepotMode
+STATUS_REMOTE_CONTROL = 13
 STATUS_SLEEPING = 14
+STATUS_SELF_TEST = 15
 STATUS_STANDBY = 17
-STATUS_SEGMENT_CLEANING = 18
+STATUS_AREA_CLEAN = 18
+STATUS_CUSTOM_AREA_CLEAN = 19
+STATUS_SPOT_CLEAN = 20
+STATUS_FAST_MAPPING = 21
+STATUS_MONITOR_CRUISE = 22
+STATUS_MONITOR_SPOT = 23     # the mode go_to_point uses
+STATUS_SUMMON_CLEAN = 24
+STATUS_PERSON_FOLLOW = 26
+STATUS_WATER_SELF_CHECK = 1501
 
 CLEANING_STATES = {
-    STATUS_CLEANING,
-    STATUS_PARTIAL_CLEANING,
-    STATUS_SEGMENT_CLEANING,
+    STATUS_AUTO_CLEAN,
+    STATUS_PART_CLEAN,
+    STATUS_FOLLOW_WALL,
+    STATUS_AREA_CLEAN,
+    STATUS_CUSTOM_AREA_CLEAN,
+    STATUS_SPOT_CLEAN,
+    STATUS_FAST_MAPPING,
+    STATUS_SUMMON_CLEAN,
+}
+
+# Driving under our own control, or following something - moving, but not
+# cleaning, so "cleaning" would misreport it.
+MOVING_STATES = {
+    STATUS_REMOTE_CONTROL,
+    STATUS_MONITOR_CRUISE,
+    STATUS_MONITOR_SPOT,
+    STATUS_PERSON_FOLLOW,
 }
 
 CHARGING_STATUS_CHARGING = 1
@@ -136,7 +163,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
 
         if status == STATUS_ERROR:
             return VacuumActivity.ERROR
-        if status in CLEANING_STATES:
+        if status in CLEANING_STATES or status in MOVING_STATES:
             return VacuumActivity.CLEANING
         if status == STATUS_PAUSED:
             return VacuumActivity.PAUSED
