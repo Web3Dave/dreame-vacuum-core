@@ -124,6 +124,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Robot pose, decoded from map frames. Kept out of `data` because map
         # frames arrive by push on their own schedule, not from the poll.
         self.position: dict | None = None
+        self._position_at: float | None = None
         self._map_ids = self.profile.prop_id("CleanMap", "PropMapdata")
 
         # siid.piid -> bool; None until probed
@@ -270,6 +271,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if position is None:
             return
         self.position = position
+        self._position_at = time.monotonic()
         self._last_change = time.time()
 
     async def async_request_map(self) -> bool:
@@ -282,11 +284,23 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ids = self.profile.prop_id("CleanMap", "PropFrameInfo")
         if ids is None:
             return False
-        return await self.async_action(
-            "CleanMap", "mapReq", [{"piid": ids[1], "value": '{"frame_type":"I"}'}]
+        # force_type makes the device regenerate rather than hand back the
+        # frame it already sent, which is the difference between a fresh pose
+        # and the same stale one.
+        params = json.dumps(
+            {"req_type": 1, "frame_type": "I", "force_type": 1}, separators=(",", ":")
         )
+        return await self.async_action("CleanMap", "mapReq", [{"piid": ids[1], "value": params}])
 
-    async def async_refresh_position(self, timeout: float = 8.0) -> float | None:
+    def position_age(self) -> float:
+        """Seconds since the pose was last updated, or inf if never."""
+        if self._position_at is None:
+            return float("inf")
+        return time.monotonic() - self._position_at
+
+    async def async_refresh_position(
+        self, timeout: float = 8.0, max_age: float = 0.0
+    ) -> float | None:
         """Force a map frame and wait for the pose it carries.
 
         Returns the heading in degrees, or None if no fresh frame could be
@@ -294,6 +308,16 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         after a rotation step would make the loop think the robot hadn't moved
         and send the same correction again.
         """
+        # A caller that only needs to know roughly where the robot is (rather
+        # than measuring the result of a nudge) can accept a recent reading.
+        # Forcing a frame is not always possible: on Dreame-cloud devices the
+        # map property often reads back empty because the real map is fetched
+        # from cloud storage, so frames only arrive by push.
+        if max_age and self.position_age() <= max_age:
+            angle = (self.position or {}).get("angle")
+            if angle is not None:
+                return float(angle)
+
         before = (self.position or {}).get("frame_id")
         await self.async_request_map()
 
@@ -364,6 +388,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return False
         self.position = position
+        self._position_at = time.monotonic()
         return True
 
     async def async_remote_control_step(self, rotation: int = 0, velocity: int = 0) -> bool:
@@ -410,7 +435,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Sanity-check against the frame the coordinates belong to. Numbers
         # from an older map put the robot somewhere arbitrary, and it will
         # happily drive there.
-        start = await self.async_refresh_position()
+        start = await self.async_refresh_position(max_age=300)
         if start is None:
             raise HomeAssistantError(
                 f"Could not read {self.device_name}'s position. {self._position_diagnosis()}"
@@ -449,8 +474,14 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         deadline = time.monotonic() + timeout
         closest: float | None = None
 
+        ticks = 0
         while time.monotonic() < deadline:
             await self.hass.async_add_executor_job(self._read_map_frame)
+            # Frames arrive by push while the robot drives, but nudge the
+            # device periodically in case they stop.
+            ticks += 1
+            if ticks % 5 == 0:
+                await self.async_request_map()
             pos = self.position or {}
             if pos.get("x") is not None:
                 distance = math.hypot(pos["x"] - x, pos["y"] - y)
