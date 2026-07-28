@@ -72,6 +72,22 @@ class DreameStreamSwitch(DreameEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs) -> None:
         c = self.coordinator
         cfg = c.config
+
+        # Logged unconditionally: when the toggle springs back, the first
+        # thing to establish is whether this handler ran at all. The add-on's
+        # log can't answer that - a call that fails here never reaches it.
+        _LOGGER.info("Stream switch: starting the stream for %s", c.device_name)
+
+        missing = [k for k in (CONF_USERNAME, CONF_PASSWORD) if not cfg.get(k)]
+        if missing:
+            _LOGGER.error(
+                "Cannot start the stream for %s: the config entry has no %s. "
+                "Re-add the integration to restore it",
+                c.device_name,
+                " or ".join(missing),
+            )
+            return
+
         # Blocks until the feed is actually publishing, so the switch doesn't
         # report on before anything can read the stream.
         url = await c.companion.async_stream_start(
@@ -88,6 +104,7 @@ class DreameStreamSwitch(DreameEntity, SwitchEntity):
             _LOGGER.warning("Could not start the stream for %s", c.device_name)
 
     async def async_turn_off(self, **kwargs) -> None:
+        _LOGGER.info("Stream switch: stopping the stream for %s", self.coordinator.device_name)
         if await self.coordinator.companion.async_stream_stop(self.coordinator.did):
             self._running = False
             self.async_write_ha_state()
