@@ -785,6 +785,15 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         observable via map frames at roughly 0.4 Hz, so this is
         step -> settle -> measure rather than continuous control.
         """
+        # Logged unconditionally so a run is always visible in the log, even
+        # when it does nothing: "the service did nothing" and "the service was
+        # never called" look identical from outside.
+        _LOGGER.warning(
+            "rotate_to_heading %s: target %s, tolerance %s, camera PIN %s",
+            self.device_name, heading, tolerance,
+            "set" if (self.config.get(CONF_CAMERA_PIN) or "").strip() else "MISSING",
+        )
+
         current = await self.async_refresh_position()
         if current is None:
             raise HomeAssistantError(
