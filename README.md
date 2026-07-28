@@ -1,137 +1,95 @@
-# Dreame Vacuum Core — Home Assistant Integration
+# Dreame Vacuum Core
 
-A Home Assistant integration for Dreame robot vacuums, built around **generated
-device profiles** rather than hand-maintained mapping tables: the `siid`/`piid`/
-`aiid` numbers and per-model capability flags are extracted from Dreame's own
-plugin bundles, so supporting a new model is mostly data rather than code.
+Control your Dreame robot vacuum from Home Assistant — cleaning controls,
+battery and status, and optionally a live camera feed.
 
-Camera streaming is handled by the companion
-[Dreame Vacuum Companion add-on](https://github.com/Web3Dave/dreame-vacuum-companion),
-which is optional.
+> **Use it only with your own vacuum and account.** This talks to Dreame's
+> servers the same way their app does, using undocumented endpoints. Dreame
+> could change them at any time and break it without warning.
 
-**This only works for a device and account you own.** The signing algorithm and
-API endpoints this relies on are undocumented and reverse-engineered — Dreame
-could change them at any time without notice.
+## What you get
 
-## Why the split
-
-Tencent's XP2P libraries (which the camera needs) are published for x86_64 Linux
-only — there is no ARM build. Keeping streaming in a separate add-on is what
-allows this integration to stay pure Python and run on a Raspberry Pi, HA Green
-or HA Yellow.
-
-| | Where | Runs on |
-|---|---|---|
-| Vacuum control, state, entities | this integration | anything HA runs on |
-| Camera streaming + snapshots | companion add-on | x86_64 only |
-
-Camera setup is a skippable step in the config flow. Without it you still get
-the vacuum, sensors and controls.
-
-## Entities
-
-Per device:
-
-| Entity | Notes |
+| Entity | What it does |
 |---|---|
-| `vacuum.<name>` | start / stop / pause / return to base / locate, battery |
-| `sensor.<name>_battery` | |
-| `sensor.<name>_volume` | |
-| `camera.<name>_camera` | only with the add-on. `stream_source` starts the RTSP feed lazily when you open the live view; the thumbnail is the last snapshot, so rendering it never wakes the camera |
-| `button.<name>_take_snapshot` | only with the add-on. Saves to the Media Browser |
+| **Vacuum** | Start, stop, pause, send home, locate, battery level |
+| **Battery** | Battery percentage |
+| **Volume** | Speaker volume |
+| **Camera** \* | Live view and still images |
+| **Take snapshot** \* | Saves a photo to your Media browser |
 
-Sensors are only created when the profile knows the property **and** the device
-actually answered for it, so a model without a given part never gets a phantom
-entity.
+\* Camera entities need the companion add-on — see below.
 
-## Installation
+## What you need
 
-1. *(Optional, for camera)* Install and start the
-   [companion add-on](https://github.com/Web3Dave/dreame-vacuum-companion) and
-   set an `api_token` in its Configuration tab.
-2. Copy `custom_components/dreame_vacuum_core/` into your Home Assistant
-   `config/custom_components/` directory, or add this repo to HACS as a custom
-   repository.
-3. Restart Home Assistant.
-4. **Settings → Devices & Services → Add Integration → Dreame Vacuum Core**.
-5. Enter your Dreame account username, password and region, then pick a device.
-6. On the camera step, either enter the add-on's host/port/token and the
-   camera's 4-digit privacy PIN, or **leave the token blank to skip it**.
+- Home Assistant
+- A Dreame account (the same one you use in the Dreamehome app)
+- Your vacuum's **4-digit camera PIN**, if you want the camera
 
-## How profiles work
+### About the camera
 
-Three things that are easy to conflate, and are deliberately kept apart:
+Camera support needs the separate
+[Dreame Vacuum Companion](https://github.com/Web3Dave/dreame-vacuum-companion)
+add-on, and that add-on **only runs on x86_64 hardware** — an Intel/AMD mini-PC,
+NUC or VM. It will not run on a Raspberry Pi, Home Assistant Green or Yellow,
+because the video libraries it depends on aren't published for those.
 
-1. **Vocabulary** — `profiles/_services.json`, generated and safe to merge
-   across models. Says *what* `siid 32` is. A dictionary; it implies nothing
-   about your device.
-2. **Feature flags** — `profiles/<model>.json`, Dreame's own published manifest
-   (~125 flags such as `supportDrySpeed`). Good for gating optional behaviour.
-   **Not** a service inventory — there is no flag meaning "has a fluffing
-   roller".
-3. **Presence** — whether *this unit* implements a property. Only knowable by
-   probing: unsupported reads return `code: -1`, supported ones `code: 0`.
+Everything else — cleaning, status, battery, controls — works on any Home
+Assistant install. The camera step is optional and can be skipped.
 
-Both generated files ship with the integration, so setup never depends on
-Dreame's servers being reachable. A model with no shipped manifest still works —
-it gets the shared vocabulary and falls back to probing.
+## Install
 
-Regenerate with `scripts/` (see [scripts/README.md](scripts/README.md)):
+**Via HACS** (recommended)
 
-```bash
-export DREAME_USERNAME=... DREAME_PASSWORD=... DREAME_COUNTRY=eu
-export DREAME_LIB_PATH=../dreame-vacuum-companion/dreame_vacuum_companion
-python3 scripts/fetch_plugins.py --models-file scripts/models.txt --from-account
-python3 scripts/extract_profiles.py
-```
+1. HACS → ⋮ → **Custom repositories**
+2. Add `https://github.com/Web3Dave/dreame-vacuum-core` as an **Integration**
+3. Install **Dreame Vacuum Core**, then restart Home Assistant
 
-## Layout
+**Manually**
 
-```
-custom_components/dreame_vacuum_core/
-  transport/     vendored: login, request signing, MQTT (sync - executor only)
-  profiles/      generated JSON: service vocabulary + model manifests
-  profile.py     loads the above, keeps the three concerns separate
-  coordinator.py MQTT push primary, adaptive polling to reconcile, keep-alive
-  companion.py   client for the companion add-on
-  vacuum.py sensor.py camera.py button.py
-scripts/         profile generation (dev-time only)
-```
+Copy `custom_components/dreame_vacuum_core/` into your Home Assistant
+`config/custom_components/` folder and restart.
 
-`transport/` is carried over from the add-on rather than rewritten — the signing
-scheme was recovered by instrumenting the real app, and a second from-scratch
-implementation would risk being subtly wrong for no benefit. Everything above it
-is new.
+## Set up
 
-## Two things the device requires
+1. **Settings → Devices & Services → Add Integration → Dreame Vacuum Core**
+2. Enter your Dreame username, password and region (most European accounts are
+   `eu` — check **Settings → Region** in the app if unsure)
+3. Choose your vacuum
+4. **Camera step** — either fill in the add-on's host, port, API token and your
+   camera PIN, or **leave the token blank to skip the camera entirely**
 
-- **A keep-alive every ~25s** (`siid 14 / piid 4`). The device stops sending
-  non-essential data when it lapses. The coordinator handles this.
-- **A separate camera keep-alive** (`siid 10001 / aiid 1 / piid 6`) while a
-  stream is running, which the add-on owns. Miss it and the video freezes
-  abruptly after ~60s while the connection still looks healthy.
+## Supported vacuums
 
-## Status
+Any Dreame vacuum on your account should connect. The integration ships tuned
+profiles for some models and automatically detects what the others support, so
+an unrecognised vacuum still works — you may just see fewer entities.
 
-This is an early implementation. Working: config flow, profile loading,
-push + poll coordination, device keep-alive, the entities listed above, and
-device registration with the companion add-on's UI.
+If something is missing for your model, open an issue with the model name (it
+looks like `dreame.vacuum.r2579h`) and it can usually be added.
 
-Not yet: map handling, consumable sensors, `playSound`, fan-speed and
-water-level selects, and closed-loop `rotate_to` (pose is only available from
-map data at roughly 0.4 Hz, so that needs step → settle → measure rather than
-continuous control).
+## Not included yet
 
-Known rough edges:
+- Maps and room-based cleaning
+- Consumable/filter life sensors
+- Fan speed and water level selection
+- Playing sounds through the vacuum
 
-- The vacuum status mapping covers the common values; unmapped ones log at
-  debug and leave the state as unknown.
-- `pause` maps to the device's stop action — there is no distinct pause action
-  in the profile.
-- One account per config entry.
+Some vacuum states may show as unknown — please report those with the model
+name so the mapping can be filled in.
 
-## Legacy
+## Troubleshooting
 
-`custom_components/dreame_camera_capture/` is the earlier camera-only
-integration, superseded by `dreame_vacuum_core`. It is kept temporarily so
-existing installs keep working and will be removed.
+**Won't sign in** — check the region matches your account. A wrong region looks
+exactly like a wrong password.
+
+**No camera entities** — the camera is opt-in. Re-add the integration and fill
+in the add-on details on the camera step.
+
+**Camera view freezes or won't start** — confirm the companion add-on is running
+and its API token matches, and check the add-on's log.
+
+---
+
+Contributing? See [`custom_components/dreame_vacuum_core/README.md`](custom_components/dreame_vacuum_core/README.md)
+for the architecture and [`scripts/README.md`](scripts/README.md) for how device
+profiles are generated.
