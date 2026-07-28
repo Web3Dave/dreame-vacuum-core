@@ -10,3 +10,8 @@ __pycache__/
 # Local dev credentials
 .env
 secrets/
+
+# diagnostic snapshots
+*.json
+!custom_components/**/*.json
+!hacs.json

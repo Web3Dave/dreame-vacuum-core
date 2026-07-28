@@ -100,3 +100,19 @@ Dreame ships an update, and a reviewable diff is the entire point.
   values (`Monitor` and `Audio` were verified by hand against a real device),
   but a Dreame refactor could silently change the shape. The `--print-services`
   output is the quickest sanity check after any regeneration.
+
+## dump_properties.py
+
+Snapshots every property in the generated vocabulary and diffs two snapshots.
+Written to find what the device changes when the app's live view is open,
+since driving from the live view turns without running the brushes while
+driving it any other way vacuums as it goes.
+
+```
+python scripts/dump_properties.py --out before.json     # idle
+python scripts/dump_properties.py --out during.json     # stream running
+python scripts/dump_properties.py --diff before.json during.json
+```
+
+Snapshots contain device state, not credentials, but they do identify the
+device - keep them out of the repo.
