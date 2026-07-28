@@ -506,6 +506,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         x: int,
         y: int,
         heading: float | None = None,
+        heading_tolerance: float = 1.0,
         arrival_tolerance: int = 250,
         timeout: float = 180.0,
     ) -> None:
@@ -550,7 +551,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # a paused mopping task sends the robot back to wash.
             await self.async_action("VacuumExtend", "stopClean")
             await asyncio.sleep(3)
-            await self.async_rotate_to_heading(heading)
+            await self.async_rotate_to_heading(heading, tolerance=heading_tolerance)
 
     async def _async_wait_until_arrived(
         self, x: int, y: int, arrival_tolerance: int, timeout: float

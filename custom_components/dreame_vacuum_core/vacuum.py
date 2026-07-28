@@ -62,6 +62,7 @@ ATTR_X = "x"
 ATTR_Y = "y"
 ATTR_ARRIVAL_TOLERANCE = "arrival_tolerance"
 ATTR_TIMEOUT = "timeout"
+ATTR_HEADING_TOLERANCE = "heading_tolerance"
 
 
 async def async_setup_entry(
@@ -97,6 +98,9 @@ async def async_setup_entry(
             vol.Required(ATTR_Y): vol.Coerce(int),
             # Optional: omit to arrive without caring which way it faces.
             vol.Optional(ATTR_HEADING): vol.All(vol.Coerce(float), vol.Range(min=0, max=359)),
+            vol.Optional(ATTR_HEADING_TOLERANCE, default=1): vol.All(
+                vol.Coerce(float), vol.Range(min=1, max=30)
+            ),
             vol.Optional(ATTR_ARRIVAL_TOLERANCE, default=250): vol.All(
                 vol.Coerce(int), vol.Range(min=50, max=2000)
             ),
@@ -226,9 +230,15 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         x: int,
         y: int,
         heading: float | None = None,
+        heading_tolerance: float = 1.0,
         arrival_tolerance: int = 250,
         timeout: float = 180.0,
     ) -> None:
         await self.coordinator.async_go_to_point(
-            x, y, heading=heading, arrival_tolerance=arrival_tolerance, timeout=timeout
+            x,
+            y,
+            heading=heading,
+            heading_tolerance=heading_tolerance,
+            arrival_tolerance=arrival_tolerance,
+            timeout=timeout,
         )

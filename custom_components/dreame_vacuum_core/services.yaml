@@ -98,6 +98,15 @@ go_to_point:
           min: 0
           max: 359
           unit_of_measurement: "°"
+    heading_tolerance:
+      name: Heading tolerance
+      description: How close the final heading must be, in degrees.
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: "°"
     arrival_tolerance:
       name: Arrival tolerance
       description: How close in millimetres counts as arrived.
