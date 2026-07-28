@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 
+import voluptuous as vol
 from homeassistant.components.vacuum import (
     StateVacuumEntity,
     VacuumActivity,
@@ -19,6 +20,7 @@ from homeassistant.components.vacuum import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -47,12 +49,36 @@ CLEANING_STATES = {
 
 CHARGING_STATUS_CHARGING = 1
 
+SERVICE_ROTATE_TO_HEADING = "rotate_to_heading"
+ATTR_HEADING = "heading"
+ATTR_TOLERANCE = "tolerance"
+ATTR_MAX_ATTEMPTS = "max_attempts"
+ATTR_DAMPING = "damping"
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: DreameCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([DreameVacuum(coordinator)])
+
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        SERVICE_ROTATE_TO_HEADING,
+        {
+            vol.Required(ATTR_HEADING): vol.All(vol.Coerce(float), vol.Range(min=0, max=359)),
+            vol.Optional(ATTR_TOLERANCE, default=1): vol.All(
+                vol.Coerce(float), vol.Range(min=1, max=30)
+            ),
+            vol.Optional(ATTR_MAX_ATTEMPTS, default=10): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=20)
+            ),
+            vol.Optional(ATTR_DAMPING, default=0.3): vol.All(
+                vol.Coerce(float), vol.Range(min=0.1, max=1)
+            ),
+        },
+        "async_rotate_to_heading",
+    )
 
 
 class DreameVacuum(DreameEntity, StateVacuumEntity):
@@ -151,3 +177,14 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
 
     async def async_locate(self, **kwargs) -> None:
         await self.coordinator.async_action("Audio", "position")
+
+    async def async_rotate_to_heading(
+        self,
+        heading: float,
+        tolerance: float = 1.0,
+        max_attempts: int = 10,
+        damping: float = 0.3,
+    ) -> None:
+        await self.coordinator.async_rotate_to_heading(
+            heading, tolerance=tolerance, max_attempts=max_attempts, damping=damping
+        )

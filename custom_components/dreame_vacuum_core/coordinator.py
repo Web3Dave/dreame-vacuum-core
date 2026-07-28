@@ -15,13 +15,20 @@ Design notes worth keeping in mind when extending this:
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import random
 import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -272,6 +279,97 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         return await self.async_action(
             "CleanMap", "mapReq", [{"piid": ids[1], "value": '{"frame_type":"I"}'}]
+        )
+
+    async def async_refresh_position(self, timeout: float = 8.0) -> float | None:
+        """Force a map frame and wait for the pose it carries.
+
+        Returns the heading in degrees, or None if no *fresh* frame arrived.
+        Staleness matters here: reusing the previous frame's heading after a
+        rotation step would make the loop think the robot hadn't moved and
+        send the same correction again.
+        """
+        before = (self.position or {}).get("frame_id")
+        await self.async_request_map()
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            pos = self.position
+            if pos and pos.get("frame_id") != before and pos.get("angle") is not None:
+                return float(pos["angle"])
+            await asyncio.sleep(0.3)
+        return None
+
+    async def async_remote_control_step(self, rotation: int = 0, velocity: int = 0) -> bool:
+        """One remote-control nudge. rotation is degrees, velocity mm/s."""
+        ids = self.profile.prop_id("VacuumExtend", "PropRemoteState")
+        if ids is None:
+            return False
+        payload = json.dumps(
+            {
+                "spdv": int(velocity),
+                "spdw": int(rotation),
+                "audio": "false",
+                # The device ignores a command identical to the last one; the
+                # nonce is what makes repeated equal steps take effect.
+                "random": random.randrange(65535),
+            },
+            separators=(",", ":"),
+        )
+        # retry_count=1: a retried movement command could be applied twice.
+        result = await self.hass.async_add_executor_job(
+            self._protocol.set_property, ids[0], ids[1], payload, 1
+        )
+        return bool(isinstance(result, list) and result and result[0].get("code") == 0)
+
+    async def async_rotate_to_heading(
+        self,
+        heading: float,
+        tolerance: float = 1.0,
+        max_attempts: int = 10,
+        damping: float = 0.3,
+    ) -> None:
+        """Turn on the spot until the robot faces `heading`.
+
+        Closed loop, because the device has no absolute "turn to" command -
+        only relative nudges, and it under- or over-shoots them. Pose is only
+        observable via map frames at roughly 0.4 Hz, so this is
+        step -> settle -> measure rather than continuous control.
+        """
+        current = await self.async_refresh_position()
+        if current is None:
+            raise HomeAssistantError(
+                f"{self.device_name} did not report its position - it may not be localised"
+            )
+
+        for _ in range(int(max_attempts)):
+            # Shortest signed turn, so it never takes the long way round.
+            diff = (heading - current) % 360
+            if diff > 180:
+                diff -= 360
+
+            if abs(diff) <= tolerance:
+                return
+
+            step = int(round(diff * damping))
+            if step == 0:
+                # Damping rounds sub-degree corrections to nothing, which would
+                # burn every remaining attempt without moving.
+                step = 1 if diff > 0 else -1
+
+            if not await self.async_remote_control_step(rotation=step):
+                raise HomeAssistantError(f"{self.device_name} rejected the rotation command")
+
+            measured = await self.async_refresh_position()
+            if measured is None:
+                raise HomeAssistantError(
+                    f"Lost track of {self.device_name}'s position mid-rotation"
+                )
+            current = measured
+
+        raise HomeAssistantError(
+            f"{self.device_name} did not reach {heading}° within {max_attempts} attempts "
+            f"(stopped at {current}°)"
         )
 
     # -- keep-alive -------------------------------------------------------
