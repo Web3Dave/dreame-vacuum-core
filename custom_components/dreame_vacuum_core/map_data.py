@@ -112,6 +112,12 @@ def decode_position(raw: str, iv: str | None = None) -> dict | None:
         except Exception:  # noqa: BLE001 - trailer is optional and often absent
             pass
 
+    # The dock uses the same sentinel as the angle when its position is
+    # unknown - which it is whenever the robot hasn't seen the dock on this
+    # map. Reporting 32767 as a coordinate would put it 32 metres away.
+    charger_x, charger_y = _int16(data, 11), _int16(data, 13)
+    docked_known = charger_x != ANGLE_UNKNOWN and charger_y != ANGLE_UNKNOWN
+
     return {
         "map_id": _int16(data, 0),
         "frame_id": _int16(data, 2),
@@ -119,7 +125,7 @@ def decode_position(raw: str, iv: str | None = None) -> dict | None:
         "x": _int16(data, 5) if located else None,
         "y": _int16(data, 7) if located else None,
         "angle": angle if located else None,
-        "charger_x": _int16(data, 11),
-        "charger_y": _int16(data, 13),
+        "charger_x": charger_x if docked_known else None,
+        "charger_y": charger_y if docked_known else None,
         "grid_size": _int16(data, 17),
     }
