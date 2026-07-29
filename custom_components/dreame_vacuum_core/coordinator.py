@@ -815,7 +815,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "set" if (self.config.get(CONF_CAMERA_PIN) or "").strip() else "MISSING",
         )
 
-        current = await self.async_refresh_position()
+        # Lenient for the opening read: it only needs to know roughly where the
+        # robot is pointing. Insisting on a brand new frame here fails before
+        # anything has moved, because a stationary robot may not have uploaded
+        # one for a long time.
+        current = await self.async_refresh_position(max_age=180)
         if current is None:
             raise HomeAssistantError(
                 f"Could not read {self.device_name}'s heading. "
@@ -915,7 +919,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # attempt. Wait longer for bigger turns.
             await asyncio.sleep(min(settle + abs(step) * 0.15, 20.0))
 
-            measured = await self.async_refresh_position()
+            # Strict, and with a longer window: this is the measurement the
+            # next correction depends on, and it has to reflect the turn that
+            # just happened rather than the frame from before it.
+            measured = await self.async_refresh_position(timeout=35.0)
             if measured is None:
                 raise HomeAssistantError(
                     f"{self.device_name} turned but did not report a new position, so "
