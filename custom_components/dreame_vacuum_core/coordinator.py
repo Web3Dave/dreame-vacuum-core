@@ -696,6 +696,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         heading_tolerance: float = 1.0,
         arrival_tolerance: int = 250,
         timeout: float = 180.0,
+        use_camera_session: bool = True,
     ) -> None:
         """Drive to a point on the current map, optionally facing a heading.
 
@@ -738,7 +739,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # a paused mopping task sends the robot back to wash.
             await self.async_action("VacuumExtend", "stopClean")
             await self._async_wait_until_idle()
-            await self.async_rotate_to_heading(heading, tolerance=heading_tolerance)
+            await self.async_rotate_to_heading(
+                heading, tolerance=heading_tolerance,
+                use_camera_session=use_camera_session,
+            )
 
     async def _async_wait_until_idle(self, timeout: float = 30.0) -> None:
         """Block until no task is running.
@@ -759,6 +763,110 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.device_name,
             self.value("VacuumExtend", "PropWorkMode"),
         )
+
+    async def async_inspect_point(
+        self,
+        x: int,
+        y: int,
+        heading: float | None = None,
+        filename: str | None = None,
+        arrival_tolerance: int = 250,
+        heading_tolerance: float = 5.0,
+        timeout: float = 180.0,
+        return_to_dock: bool = True,
+    ) -> dict:
+        """Drive somewhere, face a heading, photograph it, come home.
+
+        One camera stream is held open across the whole run. That solves two
+        things at once: the stream keeps the device out of remote-control
+        cleaning mode so turning is silent, and /capture pulls its frame from
+        the running stream rather than negotiating a fresh session - which is
+        what made snapshots come back holding a previous run's image.
+
+        Returns what actually happened rather than raising, so a caller can
+        report a partial success. Only an outright failure to move raises.
+        """
+        if not self.companion:
+            raise HomeAssistantError(
+                f"{self.device_name} has no companion add-on configured, "
+                "which is needed to take a photo"
+            )
+
+        cfg = self.config
+        creds = (
+            cfg[CONF_USERNAME], cfg[CONF_PASSWORD],
+            cfg.get(CONF_COUNTRY, "eu"), cfg.get(CONF_CAMERA_PIN, ""),
+        )
+
+        # Leave a stream that was already running alone - stopping someone
+        # else's stream at the end would be a surprise.
+        started_here = False
+        if not await self.companion.async_stream_status(self.did):
+            if await self.companion.async_stream_start(*creds, self.did):
+                started_here = True
+                _LOGGER.debug("Opened a stream for the inspection of %s", self.device_name)
+            else:
+                _LOGGER.warning(
+                    "Could not start a stream for %s; the turn will run the brushes "
+                    "and the photo may be stale", self.device_name,
+                )
+
+        result: dict[str, Any] = {"arrived": False, "photo": None}
+        try:
+            await self.async_go_to_point(
+                x, y, heading=heading,
+                heading_tolerance=heading_tolerance,
+                arrival_tolerance=arrival_tolerance,
+                timeout=timeout,
+                # The stream already holds a session; a second would be refused.
+                use_camera_session=not started_here,
+            )
+            result["arrived"] = True
+        except HomeAssistantError as err:
+            # Photograph wherever it got to - that picture is often the point.
+            result["error"] = str(err)
+            _LOGGER.warning("Inspection of %s did not arrive: %s", self.device_name, err)
+
+        result["photo"] = await self._async_capture_to(filename, creds)
+
+        if self.position:
+            result.update({k: self.position.get(v) for k, v in
+                           (("x", "x"), ("y", "y"), ("heading", "angle"))})
+
+        if started_here:
+            await self.companion.async_stream_stop(self.did)
+        if return_to_dock:
+            await self.async_action("Battery", "StartCharge")
+        return result
+
+    async def _async_capture_to(self, filename: str | None, creds: tuple) -> str | None:
+        """Take a fresh photo and optionally copy it where the caller asked."""
+        path = await self.companion.async_capture(*creds, self.did)
+        if not path:
+            _LOGGER.warning("Could not capture a photo of %s", self.device_name)
+            return None
+        if not filename:
+            return path
+
+        image = await self.companion.async_latest_image(self.did)
+        if not image:
+            return path
+        try:
+            await self.hass.async_add_executor_job(self._write_image, filename, image)
+        except OSError as err:
+            _LOGGER.error("Could not write the photo to %s: %s", filename, err)
+            return path
+        return filename
+
+    @staticmethod
+    def _write_image(filename: str, image: bytes) -> None:
+        """Blocking. Creates the directory - a missing folder is the usual
+        reason a snapshot path fails, and it is not worth an error."""
+        from pathlib import Path
+
+        target = Path(filename)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(image)
 
     async def _async_wait_until_arrived(
         self, x: int, y: int, arrival_tolerance: int, timeout: float
@@ -826,6 +934,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         settle: float = 4.0,
         quiet: bool = True,
         camera_settle: float | None = None,
+        use_camera_session: bool = True,
     ) -> None:
         """Turn on the spot until the robot faces `heading`.
 
@@ -853,8 +962,14 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         # A camera session stops the firmware promoting the drive into a
-        # remote-control cleaning task, which is what runs the brushes.
-        camera = await self._async_open_camera_session(camera_settle)
+        # remote-control cleaning task, which is what runs the brushes. A
+        # caller already holding one (a running stream, say) passes
+        # use_camera_session=False - the device allows only one at a time, so
+        # opening a second would fail and leave the turn noisy.
+        camera = (
+            await self._async_open_camera_session(camera_settle)
+            if use_camera_session else None
+        )
         previous = await self._async_quieten() if quiet and not camera else {}
         try:
             await self._async_rotate_loop(

@@ -20,7 +20,7 @@ from homeassistant.components.vacuum import (
     VacuumEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -185,6 +185,11 @@ ATTR_VELOCITY = "velocity"
 ATTR_DURATION = "duration"
 ATTR_SILENT = "silent"
 
+SERVICE_INSPECT_POINT = "inspect_point"
+ATTR_FILENAME = "filename"
+ATTR_RETURN_TO_DOCK = "return_to_dock"
+ATTR_USE_CAMERA_SESSION = "use_camera_session"
+
 
 def _device_state_name(value) -> str | None:
     """Name the state where we know it, otherwise pass the number through."""
@@ -219,6 +224,7 @@ async def async_setup_entry(
                 vol.Coerce(float), vol.Range(min=0, max=15)
             ),
             vol.Optional(ATTR_QUIET, default=True): cv.boolean,
+            vol.Optional(ATTR_USE_CAMERA_SESSION, default=True): cv.boolean,
             vol.Optional(ATTR_CAMERA_SETTLE): vol.All(
                 vol.Coerce(float), vol.Range(min=0, max=20)
             ),
@@ -259,6 +265,27 @@ async def async_setup_entry(
             vol.Optional(ATTR_SILENT, default=True): cv.boolean,
         },
         "async_remote_control",
+    )
+    platform.async_register_entity_service(
+        SERVICE_INSPECT_POINT,
+        {
+            vol.Required(ATTR_X): vol.Coerce(int),
+            vol.Required(ATTR_Y): vol.Coerce(int),
+            vol.Optional(ATTR_HEADING): vol.All(vol.Coerce(float), vol.Range(min=0, max=359)),
+            vol.Optional(ATTR_FILENAME): cv.string,
+            vol.Optional(ATTR_ARRIVAL_TOLERANCE, default=250): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=2000)
+            ),
+            vol.Optional(ATTR_HEADING_TOLERANCE, default=5): vol.All(
+                vol.Coerce(float), vol.Range(min=1, max=30)
+            ),
+            vol.Optional(ATTR_TIMEOUT, default=180): vol.All(
+                vol.Coerce(float), vol.Range(min=10, max=600)
+            ),
+            vol.Optional(ATTR_RETURN_TO_DOCK, default=True): cv.boolean,
+        },
+        "async_inspect_point",
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
 
@@ -368,6 +395,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         settle: float = 4.0,
         quiet: bool = True,
         camera_settle: float | None = None,
+        use_camera_session: bool = True,
     ) -> None:
         await self.coordinator.async_rotate_to_heading(
             heading,
@@ -377,6 +405,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
             settle=settle,
             quiet=quiet,
             camera_settle=camera_settle,
+            use_camera_session=use_camera_session,
         )
 
     async def async_go_to_point(
@@ -403,4 +432,22 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
     ) -> None:
         await self.coordinator.async_remote_control(
             rotation=rotation, velocity=velocity, duration=duration, silent=silent
+        )
+
+    async def async_inspect_point(
+        self,
+        x: int,
+        y: int,
+        heading: float | None = None,
+        filename: str | None = None,
+        arrival_tolerance: int = 250,
+        heading_tolerance: float = 5.0,
+        timeout: float = 180.0,
+        return_to_dock: bool = True,
+    ) -> dict:
+        return await self.coordinator.async_inspect_point(
+            x, y, heading=heading, filename=filename,
+            arrival_tolerance=arrival_tolerance,
+            heading_tolerance=heading_tolerance,
+            timeout=timeout, return_to_dock=return_to_dock,
         )

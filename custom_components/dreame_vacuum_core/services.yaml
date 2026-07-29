@@ -70,6 +70,15 @@ rotate_to_heading:
           max: 20
           step: 0.5
           unit_of_measurement: s
+    use_camera_session:
+      name: Open a camera session
+      description: >-
+        Turn off when a stream is already running. The vacuum allows one
+        camera session at a time, so opening a second would be refused and
+        the turn would run the brushes.
+      default: true
+      selector:
+        boolean:
     quiet:
       name: Quiet the vacuum
       description: >-
@@ -202,3 +211,65 @@ remote_control:
           min: 0
           max: 30
           unit_of_measurement: s
+
+inspect_point:
+  name: Inspect a point
+  description: >-
+    Drive somewhere, face a heading, photograph it and come back. Holds one
+    camera stream open for the whole run, which keeps the turn silent and
+    means the photo comes from the live feed rather than a stale snapshot.
+    Returns what happened, so a script can report a partial success.
+  target:
+    entity:
+      integration: dreame_vacuum_core
+      domain: vacuum
+  fields:
+    x:
+      name: X
+      description: Target X in millimetres, as reported by position_x.
+      required: true
+      selector:
+        number: {min: -20000, max: 20000, mode: box}
+    "y":
+      name: Y
+      description: Target Y in millimetres, as reported by position_y.
+      required: true
+      selector:
+        number: {min: -20000, max: 20000, mode: box}
+    heading:
+      name: Heading
+      description: Optional. Turn to face this after arriving.
+      selector:
+        number: {min: 0, max: 359, unit_of_measurement: "°"}
+    filename:
+      name: Save photo to
+      description: >-
+        Full path to write the photo to, for example
+        /config/www/poop_check/latest.jpg. The folder is created if missing.
+        Leave empty to keep it only in the media folder.
+      selector:
+        text:
+    arrival_tolerance:
+      name: Arrival tolerance
+      description: How close in millimetres counts as arrived.
+      default: 250
+      selector:
+        number: {min: 1, max: 2000, unit_of_measurement: mm}
+    heading_tolerance:
+      name: Heading tolerance
+      description: How close the final heading must be, in degrees.
+      default: 5
+      selector:
+        number: {min: 1, max: 30, unit_of_measurement: "°"}
+    timeout:
+      name: Timeout
+      description: Give up driving after this long.
+      default: 180
+      selector:
+        number: {min: 10, max: 600, unit_of_measurement: s}
+    return_to_dock:
+      name: Return to dock
+      description: Send the vacuum home when finished.
+      default: true
+      selector:
+        boolean:
