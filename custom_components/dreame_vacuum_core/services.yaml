@@ -158,6 +158,14 @@ go_to_point:
           min: 10
           max: 600
           unit_of_measurement: s
+    use_camera_session:
+      name: Open a camera session
+      description: >-
+        Turn off when a stream is already running - the vacuum allows one
+        camera session at a time. Only affects the heading step.
+      default: true
+      selector:
+        boolean:
 
 remote_control:
   name: Remote control (raw)

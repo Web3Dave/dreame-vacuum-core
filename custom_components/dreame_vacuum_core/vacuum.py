@@ -247,6 +247,7 @@ async def async_setup_entry(
             vol.Optional(ATTR_TIMEOUT, default=180): vol.All(
                 vol.Coerce(float), vol.Range(min=10, max=600)
             ),
+            vol.Optional(ATTR_USE_CAMERA_SESSION, default=True): cv.boolean,
         },
         "async_go_to_point",
     )
@@ -416,6 +417,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         heading_tolerance: float = 1.0,
         arrival_tolerance: int = 250,
         timeout: float = 180.0,
+        use_camera_session: bool = True,
     ) -> None:
         await self.coordinator.async_go_to_point(
             x,
@@ -424,6 +426,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
             heading_tolerance=heading_tolerance,
             arrival_tolerance=arrival_tolerance,
             timeout=timeout,
+            use_camera_session=use_camera_session,
         )
 
     async def async_remote_control(
