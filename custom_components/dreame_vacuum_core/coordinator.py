@@ -915,14 +915,17 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise HomeAssistantError(
                     f"{self.device_name} stopped without reaching ({x}, {y}) - "
                     f"work_mode {mode}, fault {fault}"
-                    + (f", {int(closest)}mm away" if closest is not None else "")
-                    + ". The target may be outside the current map."
+                    + (f", {int(closest)}mm away, so try an arrival_tolerance "
+                       f"above that" if closest is not None else "")
+                    + ". The target may be outside the current map, or the "
+                      "tolerance tighter than the robot parks."
                 )
             await asyncio.sleep(3)
 
         raise HomeAssistantError(
             f"{self.device_name} did not reach ({x}, {y}) within {int(timeout)}s"
-            + (f" - got within {int(closest)}mm" if closest is not None else "")
+            + (f" - got within {int(closest)}mm, so try an arrival_tolerance "
+               f"above that" if closest is not None else "")
         )
 
     async def async_rotate_to_heading(
