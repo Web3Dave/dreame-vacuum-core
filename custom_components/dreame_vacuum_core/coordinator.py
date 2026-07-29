@@ -81,6 +81,15 @@ TURN_RATE_DPS = 45
 # brushes and mop back on mid-turn.
 REMOTE_REFRESH_SECONDS = 1.0
 
+# A commanded turn loses a fixed amount of time to round trip and spin-up
+# before the robot moves: a 1.11s command was measured delivering 4 degrees,
+# which is 45 deg/s applied for only the last 0.09s. Compensated by adding
+# that latency to every command, learned per device because it will differ
+# with hardware and connection.
+TURN_LATENCY_DEFAULT = 1.0
+TURN_LATENCY_MAX = 4.0
+MAX_TURN_SECONDS = 12.0
+
 # Commands shorter than this are too brief for the device to act on cleanly,
 # so small corrections turn slower rather than for an unusably short time.
 MIN_TURN_SECONDS = 0.6
@@ -183,6 +192,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_failure: float | None = None
         self._keep_alive_cancel = None
         self._warned_no_pin = False
+        self._turn_latency = TURN_LATENCY_DEFAULT
 
         self.companion: CompanionClient | None = None
         if cfg.get(CONF_ENABLE_CAMERA) and cfg.get(CONF_COMPANION_TOKEN):
@@ -560,6 +570,29 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "Could not restore %s.%s to %s on %s", service, prop, value, self.device_name
                 )
 
+    def _turn_duration(self, degrees: float) -> tuple[int, float]:
+        """Rate and hold time for a turn, with this robot's latency added."""
+        duration = min(abs(degrees) / TURN_RATE_DPS + self._turn_latency, MAX_TURN_SECONDS)
+        rate = TURN_RATE_DPS if degrees > 0 else -TURN_RATE_DPS
+        return rate, duration
+
+    def _learn_turn_latency(self, held: float, achieved: float) -> None:
+        """Update the latency estimate from one observed turn.
+
+        Ignores turns that went the wrong way or barely moved: those usually
+        mean the robot was blocked or the frame was captured mid-turn, and
+        folding them in would poison the estimate.
+        """
+        if abs(achieved) < 1:
+            return
+        observed = max(0.0, held - abs(achieved) / TURN_RATE_DPS)
+        updated = self._turn_latency * 0.4 + observed * 0.6
+        self._turn_latency = max(0.0, min(TURN_LATENCY_MAX, updated))
+        _LOGGER.debug(
+            "Turn latency for %s now %.2fs (held %.2fs, turned %.1f deg)",
+            self.device_name, self._turn_latency, held, achieved,
+        )
+
     async def async_turn_degrees(self, degrees: float) -> bool:
         """Turn roughly this many degrees, then stop.
 
@@ -571,16 +604,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not degrees:
             return True
 
-        # Keep the angle but stretch the time for small corrections: a 3
-        # degree turn at the app's 45 deg/s lasts 0.07s, which is shorter than
-        # the round trip that carries it.
-        magnitude = TURN_RATE_DPS
-        duration = abs(degrees) / TURN_RATE_DPS
-        if duration < MIN_TURN_SECONDS:
-            duration = MIN_TURN_SECONDS
-            magnitude = max(abs(degrees) / MIN_TURN_SECONDS, 5)
-        duration = min(duration, 10.0)
-        rate = int(magnitude) if degrees > 0 else -int(magnitude)
+        rate, duration = self._turn_duration(degrees)
+        self._last_hold = duration
 
         if not await self.async_remote_control_step(rotation=rate):
             return False
@@ -797,7 +822,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         heading: float,
         tolerance: float = 1.0,
         max_attempts: int = 10,
-        damping: float = 0.3,
+        damping: float = 0.6,
         settle: float = 4.0,
         quiet: bool = True,
         camera_settle: float | None = None,
@@ -922,6 +947,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Strict, and with a longer window: this is the measurement the
             # next correction depends on, and it has to reflect the turn that
             # just happened rather than the frame from before it.
+            previous = current
             measured = await self.async_refresh_position(timeout=35.0)
             if measured is None:
                 raise HomeAssistantError(
@@ -929,7 +955,17 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "there is no way to tell how far it went. The robot uploads map "
                     "frames on its own schedule and none arrived in time"
                 )
+            achieved = (measured - previous) % 360
+            if achieved > 180:
+                achieved -= 360
+            self._learn_turn_latency(getattr(self, "_last_hold", 0.0), achieved)
             current = measured
+
+        final = (heading - current) % 360
+        if final > 180:
+            final -= 360
+        if abs(final) <= tolerance:
+            return
 
         raise HomeAssistantError(
             f"{self.device_name} did not reach {heading}° within {max_attempts} attempts "

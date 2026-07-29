@@ -40,7 +40,7 @@ rotate_to_heading:
       description: >-
         Fraction of the remaining error to correct each step. Lower is slower
         but less likely to oscillate around the target.
-      default: 0.3
+      default: 0.6
       selector:
         number:
           min: 0.1
