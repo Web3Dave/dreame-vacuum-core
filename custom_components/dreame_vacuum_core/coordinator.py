@@ -372,26 +372,35 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         before = (self.position or {}).get("frame_id")
         await self.async_request_map()
 
+        attempts = 0
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            # Read the property directly rather than only waiting for a push.
-            # Frames are pushed while the robot is moving, so a stationary
-            # robot may never send one - which is exactly the state it is in
-            # when you want to rotate it. A direct read is fresh by
-            # definition, so it needs no frame_id comparison.
-            if await self.hass.async_add_executor_job(self._read_map_frame):
-                angle = (self.position or {}).get("angle")
-                if angle is not None:
-                    return float(angle)
-            else:
-                # Fall back to a pushed frame, but only a new one.
-                pos = self.position
-                if pos and pos.get("frame_id") != before and pos.get("angle") is not None:
-                    return float(pos["angle"])
+            # Fetch by whatever route works, then insist the frame is new.
+            # A direct read is NOT fresh by definition: on the cloud route it
+            # downloads the last file the robot uploaded, which does not
+            # change until the robot uploads another. Trusting it meant the
+            # rotation loop re-read the same heading after every turn,
+            # computed the same correction, and nudged forever.
+            await self.hass.async_add_executor_job(self._read_map_frame)
+            pos = self.position
+            if pos and pos.get("frame_id") != before and pos.get("angle") is not None:
+                return float(pos["angle"])
+
+            # Prompt another upload - one request at the start is not enough
+            # when the robot is stationary between nudges.
+            attempts += 1
+            if attempts % 3 == 0:
+                await self.async_request_map()
+
             # Each attempt may be a full cloud round trip (resolve name, sign
             # a url, download), and the device needs a moment to upload the
             # frame it was just asked for, so don't hammer it.
             await asyncio.sleep(1.5)
+
+        _LOGGER.debug(
+            "No new map frame for %s within %.0fs (still frame %s)",
+            self.device_name, timeout, before,
+        )
         return None
 
     def _position_diagnosis(self) -> str:
@@ -897,7 +906,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             measured = await self.async_refresh_position()
             if measured is None:
                 raise HomeAssistantError(
-                    f"Lost track of {self.device_name}'s position mid-rotation"
+                    f"{self.device_name} turned but did not report a new position, so "
+                    "there is no way to tell how far it went. The robot uploads map "
+                    "frames on its own schedule and none arrived in time"
                 )
             current = measured
 
