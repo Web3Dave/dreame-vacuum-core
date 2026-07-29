@@ -601,7 +601,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return await self.async_remote_control_step(rotation=0, velocity=0)
 
     async def async_remote_control(
-        self, rotation: int = 0, velocity: int = 0, duration: float = 0.0
+        self, rotation: int = 0, velocity: int = 0, duration: float = 0.0,
+        silent: bool = True,
     ) -> None:
         """Raw remote control, for experimenting.
 
@@ -609,21 +610,35 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         keeps going until something sends zero, exactly like holding the app's
         button down. Any other duration holds it (resending at the app's 1Hz)
         and then releases.
-        """
-        if not await self.async_remote_control_step(rotation=rotation, velocity=velocity):
-            raise HomeAssistantError(f"{self.device_name} rejected the remote control command")
-        if duration <= 0:
-            return
 
-        deadline = time.monotonic() + duration
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(REMOTE_REFRESH_SECONDS, remaining))
-            if remaining > REMOTE_REFRESH_SECONDS:
-                await self.async_remote_control_step(rotation=rotation, velocity=velocity)
-        await self.async_remote_control_step(rotation=0, velocity=0)
+        `silent` wraps the move in a camera session, which is what stops the
+        firmware treating it as cleaning. It costs a few seconds of setup, so
+        it can be turned off when driving repeatedly or when the noise does
+        not matter.
+        """
+        camera = await self._async_open_camera_session() if silent else None
+        try:
+            if not await self.async_remote_control_step(rotation=rotation, velocity=velocity):
+                raise HomeAssistantError(
+                    f"{self.device_name} rejected the remote control command"
+                )
+            if duration <= 0:
+                return
+
+            deadline = time.monotonic() + duration
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(REMOTE_REFRESH_SECONDS, remaining))
+                if remaining > REMOTE_REFRESH_SECONDS:
+                    await self.async_remote_control_step(rotation=rotation, velocity=velocity)
+                    if camera:
+                        await self.hass.async_add_executor_job(camera.keep_alive)
+            await self.async_remote_control_step(rotation=0, velocity=0)
+        finally:
+            if camera:
+                await self.hass.async_add_executor_job(camera.stop)
 
     async def async_remote_control_step(self, rotation: int = 0, velocity: int = 0) -> bool:
         """Raw remote-control command. rotation is deg/s, velocity mm/s."""
@@ -794,10 +809,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         observable via map frames at roughly 0.4 Hz, so this is
         step -> settle -> measure rather than continuous control.
         """
-        # Logged unconditionally so a run is always visible in the log, even
-        # when it does nothing: "the service did nothing" and "the service was
-        # never called" look identical from outside.
-        _LOGGER.warning(
+        _LOGGER.debug(
             "rotate_to_heading %s: target %s, tolerance %s, camera PIN %s",
             self.device_name, heading, tolerance,
             "set" if (self.config.get(CONF_CAMERA_PIN) or "").strip() else "MISSING",

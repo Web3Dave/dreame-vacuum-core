@@ -183,6 +183,7 @@ SERVICE_REMOTE_CONTROL = "remote_control"
 ATTR_ROTATION = "rotation"
 ATTR_VELOCITY = "velocity"
 ATTR_DURATION = "duration"
+ATTR_SILENT = "silent"
 
 
 def _device_state_name(value) -> str | None:
@@ -255,6 +256,7 @@ async def async_setup_entry(
             vol.Optional(ATTR_DURATION, default=0): vol.All(
                 vol.Coerce(float), vol.Range(min=0, max=30)
             ),
+            vol.Optional(ATTR_SILENT, default=True): cv.boolean,
         },
         "async_remote_control",
     )
@@ -396,8 +398,9 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         )
 
     async def async_remote_control(
-        self, rotation: int = 0, velocity: int = 0, duration: float = 0.0
+        self, rotation: int = 0, velocity: int = 0, duration: float = 0.0,
+        silent: bool = True,
     ) -> None:
         await self.coordinator.async_remote_control(
-            rotation=rotation, velocity=velocity, duration=duration
+            rotation=rotation, velocity=velocity, duration=duration, silent=silent
         )

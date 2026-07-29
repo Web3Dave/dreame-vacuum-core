@@ -178,6 +178,15 @@ remote_control:
         number:
           min: -400
           max: 400
+    silent:
+      name: Silent
+      description: >-
+        Open a camera session around the move. Without one the firmware treats
+        driving as cleaning and runs the brushes and mop. Costs a few seconds
+        of setup and needs the camera PIN configured.
+      default: true
+      selector:
+        boolean:
     duration:
       name: Duration
       description: >-
