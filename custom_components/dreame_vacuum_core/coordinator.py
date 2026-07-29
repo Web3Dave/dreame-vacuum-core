@@ -70,9 +70,9 @@ _LOGGER = logging.getLogger(__name__)
 # as "start a cleaning task of this kind", not as a movement command.
 CRUISE_POINT_MODE = 23
 
-# spdw is an angular velocity, not an angle. The app's live view sends a fixed
-# +/-45 while the button is held and 0 on release - so a turn is "start
-# spinning, wait, stop", not "rotate by N degrees".
+# The values the app's live view sends: 45 / -45 to turn, 180 to spin round,
+# 200 forward. It holds them while the button is down. This integration sends
+# an angle instead - see async_turn_degrees for why.
 TURN_RATE_DPS = 45
 
 # The app resends the command every second for as long as the button is held.
@@ -80,19 +80,6 @@ TURN_RATE_DPS = 45
 # device falls back to whatever task it was in, which is what brings the
 # brushes and mop back on mid-turn.
 REMOTE_REFRESH_SECONDS = 1.0
-
-# A commanded turn loses a fixed amount of time to round trip and spin-up
-# before the robot moves: a 1.11s command was measured delivering 4 degrees,
-# which is 45 deg/s applied for only the last 0.09s. Compensated by adding
-# that latency to every command, learned per device because it will differ
-# with hardware and connection.
-TURN_LATENCY_DEFAULT = 1.0
-TURN_LATENCY_MAX = 4.0
-MAX_TURN_SECONDS = 12.0
-
-# Commands shorter than this are too brief for the device to act on cleanly,
-# so small corrections turn slower rather than for an unusably short time.
-MIN_TURN_SECONDS = 0.6
 
 # How long to let a camera session settle before moving. Measured by hand:
 # turns became silent at about three seconds.
@@ -192,7 +179,6 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_failure: float | None = None
         self._keep_alive_cancel = None
         self._warned_no_pin = False
-        self._turn_latency = TURN_LATENCY_DEFAULT
 
         self.companion: CompanionClient | None = None
         if cfg.get(CONF_ENABLE_CAMERA) and cfg.get(CONF_COMPANION_TOKEN):
@@ -570,60 +556,27 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "Could not restore %s.%s to %s on %s", service, prop, value, self.device_name
                 )
 
-    def _turn_duration(self, degrees: float) -> tuple[int, float]:
-        """Rate and hold time for a turn, with this robot's latency added."""
-        duration = min(abs(degrees) / TURN_RATE_DPS + self._turn_latency, MAX_TURN_SECONDS)
-        rate = TURN_RATE_DPS if degrees > 0 else -TURN_RATE_DPS
-        return rate, duration
-
-    def _learn_turn_latency(self, held: float, achieved: float) -> None:
-        """Update the latency estimate from one observed turn.
-
-        Ignores turns that went the wrong way or barely moved: those usually
-        mean the robot was blocked or the frame was captured mid-turn, and
-        folding them in would poison the estimate.
-        """
-        if abs(achieved) < 1:
-            return
-        observed = max(0.0, held - abs(achieved) / TURN_RATE_DPS)
-        updated = self._turn_latency * 0.4 + observed * 0.6
-        self._turn_latency = max(0.0, min(TURN_LATENCY_MAX, updated))
-        _LOGGER.debug(
-            "Turn latency for %s now %.2fs (held %.2fs, turned %.1f deg)",
-            self.device_name, self._turn_latency, held, achieved,
-        )
-
     async def async_turn_degrees(self, degrees: float) -> bool:
-        """Turn roughly this many degrees, then stop.
+        """Turn by an angle, in one command.
 
-        The device has no "turn by N" command. spdw sets a rate, so this holds
-        the turn for as long as the angle needs and then explicitly sends zero
-        - the same press-and-release the app's live view performs. Without the
-        release the robot simply keeps spinning.
+        spdw is honoured as a rotation amount by this firmware: a single
+        command of N degrees turns roughly N degrees. The app's live view uses
+        fixed values (45, 120, 180) held while a button is down, which reads
+        like a rate - but reproducing that, holding 45 for degrees/45 seconds,
+        barely moved the robot, because most of a short burst is lost to round
+        trip and spin-up. Sending the angle measured far closer, so that is
+        what this does.
+
+        No explicit stop: the device completes the rotation itself, and
+        sending zero afterwards cut the turn short.
         """
-        if not degrees:
+        step = int(round(degrees))
+        if not step:
             return True
-
-        rate, duration = self._turn_duration(degrees)
-        self._last_hold = duration
-
-        if not await self.async_remote_control_step(rotation=rate):
-            return False
-
-        # Hold the turn by resending, exactly as the app does while the button
-        # is held down. A single command left the lease to expire part way
-        # through the turn.
-        deadline = time.monotonic() + duration
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(REMOTE_REFRESH_SECONDS, remaining))
-            if remaining > REMOTE_REFRESH_SECONDS:
-                await self.async_remote_control_step(rotation=rate)
-
-        # Release. Without this the robot keeps turning.
-        return await self.async_remote_control_step(rotation=0, velocity=0)
+        # The app never sends more than 180 in one press, and a larger value
+        # would be an ambiguous way to express the long way round.
+        step = max(-180, min(180, step))
+        return await self.async_remote_control_step(rotation=step)
 
     async def async_remote_control(
         self, rotation: int = 0, velocity: int = 0, duration: float = 0.0,
@@ -1065,7 +1018,6 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Strict, and with a longer window: this is the measurement the
             # next correction depends on, and it has to reflect the turn that
             # just happened rather than the frame from before it.
-            previous = current
             measured = await self.async_refresh_position(timeout=35.0)
             if measured is None:
                 raise HomeAssistantError(
@@ -1073,10 +1025,6 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "there is no way to tell how far it went. The robot uploads map "
                     "frames on its own schedule and none arrived in time"
                 )
-            achieved = (measured - previous) % 360
-            if achieved > 180:
-                achieved -= 360
-            self._learn_turn_latency(getattr(self, "_last_hold", 0.0), achieved)
             current = measured
 
         final = (heading - current) % 360
