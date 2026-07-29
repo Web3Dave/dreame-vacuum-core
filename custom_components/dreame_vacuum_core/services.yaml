@@ -130,11 +130,14 @@ go_to_point:
           unit_of_measurement: "°"
     arrival_tolerance:
       name: Arrival tolerance
-      description: How close in millimetres counts as arrived.
+      description: >-
+        How close in millimetres counts as arrived. The robot parks
+        approximately, so very tight values may never be met and the service
+        will time out instead.
       default: 250
       selector:
         number:
-          min: 50
+          min: 1
           max: 2000
           unit_of_measurement: mm
     timeout:

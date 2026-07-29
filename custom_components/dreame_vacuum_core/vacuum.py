@@ -236,7 +236,7 @@ async def async_setup_entry(
                 vol.Coerce(float), vol.Range(min=1, max=30)
             ),
             vol.Optional(ATTR_ARRIVAL_TOLERANCE, default=250): vol.All(
-                vol.Coerce(int), vol.Range(min=50, max=2000)
+                vol.Coerce(int), vol.Range(min=1, max=2000)
             ),
             vol.Optional(ATTR_TIMEOUT, default=180): vol.All(
                 vol.Coerce(float), vol.Range(min=10, max=600)
