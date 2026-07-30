@@ -1046,6 +1046,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         The image and its origin travel together: the same pixel means a
         different place on a map with a different origin, so a picker given one
         without the other would quietly select the wrong point.
+
+        Narrated like any other errand, because Home Assistant answers a failed
+        service with a bare 500 and keeps the reason to itself.
         """
         if not self.companion:
             raise HomeAssistantError(
@@ -1053,24 +1056,60 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "which is where the map is displayed"
             )
 
+        run, owns = await self._async_begin_run("publish_map")
+        try:
+            meta = await self._async_render_and_upload(run, owns, scale)
+        except HomeAssistantError:
+            raise
+        except BaseException as err:
+            # Anything unexpected still leaves the run closed and logged -
+            # otherwise the row stays 'running' and the reason is nowhere.
+            await self._async_abandon_run(run, owns, err)
+            raise
+        await self._async_end_run(
+            run, owns, True, f"Published a {meta['size'][0]}x{meta['size'][1]} map", {}
+        )
+        return meta
+
+    async def _async_render_and_upload(
+        self, run: RunReporter, owns: bool, scale: int
+    ) -> dict:
+        async def refuse(summary: str, detail: str) -> HomeAssistantError:
+            await self._async_end_run(run, owns, False, summary, {"error": detail})
+            return HomeAssistantError(detail)
+
+        await run.step("fetching a map frame")
         await self.hass.async_add_executor_job(self._read_map_frame)
         if not self._last_frame:
-            raise HomeAssistantError(
-                f"No map available for {self.device_name}. {self._position_diagnosis()}"
+            raise await refuse(
+                "No map frame",
+                f"No map available for {self.device_name}. {self._position_diagnosis()}",
             )
 
         frame = decode_frame(self._last_frame, self.profile.flag("AES_IV"))
         if frame is None:
-            raise HomeAssistantError(f"Could not decode {self.device_name}'s map")
+            raise await refuse(
+                "Could not decode the map",
+                f"Could not decode {self.device_name}'s map frame "
+                f"({len(self._last_frame)} chars)",
+            )
 
+        await run.step(
+            f"decoded {frame['width']}x{frame['height']} cells at "
+            f"{frame['grid_size']}mm, origin {frame['origin']}"
+        )
         png = await self.hass.async_add_executor_job(render_png, frame, scale)
         if not png:
-            raise HomeAssistantError("Could not render the map - is Pillow available?")
+            raise await refuse(
+                "Could not render the map", "Could not render the map - is Pillow available?"
+            )
 
         meta = map_metadata(frame, scale)
+        await run.step(f"rendered {len(png)} bytes, uploading")
         if not await self.companion.async_publish_map(self.did, png, meta):
-            raise HomeAssistantError("The add-on would not accept the map")
-        _LOGGER.debug("Published a %sx%s map for %s", *meta["size"], self.device_name)
+            raise await refuse(
+                "Upload refused", "The add-on would not accept the map - check its log"
+            )
         return meta
 
     async def async_start_task(self, task: str) -> dict:
@@ -1174,6 +1213,19 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.active_task = ActiveTask(run.run_id, None, command)
         self._publish_task_state()
         return run, True
+
+    async def _async_abandon_run(self, run: RunReporter, owns: bool, err: BaseException) -> None:
+        """Close a run that an unexpected exception escaped through.
+
+        Without this the row stays 'running' forever, the vacuum looks busy,
+        and the reason is nowhere - which is exactly how a failure hides.
+        """
+        if not owns or self._run is None:
+            return
+        _LOGGER.exception("Unhandled error during %s", run.command, exc_info=err)
+        await self._async_end_run(
+            run, owns, False, f"{type(err).__name__}", {"error": f"{type(err).__name__}: {err}"}
+        )
 
     async def _async_end_run(
         self, run: RunReporter, owns: bool, ok: bool, summary: str, detail: dict
