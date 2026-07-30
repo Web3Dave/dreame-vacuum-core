@@ -179,6 +179,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_failure: float | None = None
         self._keep_alive_cancel = None
         self._warned_no_pin = False
+        self.last_rotation: dict | None = None
 
         self.companion: CompanionClient | None = None
         if cfg.get(CONF_ENABLE_CAMERA) and cfg.get(CONF_COMPANION_TOKEN):
@@ -697,7 +698,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # a paused mopping task sends the robot back to wash.
             await self.async_action("VacuumExtend", "stopClean")
             await self._async_wait_until_idle()
-            await self.async_rotate_to_heading(
+            self.last_rotation = await self.async_rotate_to_heading(
                 heading, tolerance=heading_tolerance,
                 use_camera_session=use_camera_session,
             )
@@ -771,6 +772,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         result: dict[str, Any] = {"arrived": False, "photo": None}
         try:
+            self.last_rotation = None
             await self.async_go_to_point(
                 x, y, heading=heading,
                 heading_tolerance=heading_tolerance,
@@ -784,6 +786,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Photograph wherever it got to - that picture is often the point.
             result["error"] = str(err)
             _LOGGER.warning("Inspection of %s did not arrive: %s", self.device_name, err)
+
+        if self.last_rotation:
+            result["rotation"] = self.last_rotation.get("trace")
 
         result["photo"] = await self._async_capture_to(filename, creds)
 
@@ -896,7 +901,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         quiet: bool = True,
         camera_settle: float | None = None,
         use_camera_session: bool = True,
-    ) -> None:
+    ) -> dict:
         """Turn on the spot until the robot faces `heading`.
 
         Closed loop, because the device has no absolute "turn to" command -
@@ -931,10 +936,16 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_open_camera_session(camera_settle)
             if use_camera_session else None
         )
+        # Collected rather than only logged, so a caller can report it without
+        # anyone having to read the log.
+        trace: list[str] = [
+            f"start {current:.0f}deg, target {heading:.0f}deg"
+            + (", camera session open" if camera else ", NO camera session")
+        ]
         previous = await self._async_quieten() if quiet and not camera else {}
         try:
             await self._async_rotate_loop(
-                heading, current, tolerance, max_attempts, damping, settle, camera
+                heading, current, tolerance, max_attempts, damping, settle, camera, trace
             )
         finally:
             # Restore even if the rotation raised, or a failed turn would
@@ -942,6 +953,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_restore(previous)
             if camera:
                 await self.hass.async_add_executor_job(camera.stop)
+        return {
+            "heading": (self.position or {}).get("angle"),
+            "trace": trace,
+        }
 
     async def _async_open_camera_session(self, settle: float | None = None) -> CameraSession | None:
         """Open a video-less camera session, or None if we cannot.
@@ -992,7 +1007,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         damping: float,
         settle: float,
         camera: CameraSession | None = None,
+        trace: list[str] | None = None,
     ) -> None:
+        trace = trace if trace is not None else []
         for attempt in range(1, int(max_attempts) + 1):
             if camera:
                 await self.hass.async_add_executor_job(camera.keep_alive)
@@ -1006,6 +1023,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "Rotation done for %s: at %.0f deg, %.0f from target %.0f",
                     self.device_name, current, diff, heading,
                 )
+                trace.append(f"done at {current:.0f}deg, {diff:+.0f} off target")
                 return
 
             step = diff * damping
@@ -1033,6 +1051,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # just happened rather than the frame from before it.
             measured = await self.async_refresh_position(timeout=35.0)
             if measured is None:
+                trace.append(f"{attempt}: commanded {step:+.0f}, NO new map frame")
                 raise HomeAssistantError(
                     f"{self.device_name} turned but did not report a new position, so "
                     "there is no way to tell how far it went. The robot uploads map "
@@ -1045,14 +1064,21 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ((measured - current + 180) % 360) - 180,
                 (self.position or {}).get("frame_id"),
             )
+            trace.append(
+                f"{attempt}: at {current:.0f}, commanded {step:+.0f}, "
+                f"now {measured:.0f} (turned {((measured - current + 180) % 360) - 180:+.0f}) "
+                f"frame {(self.position or {}).get('frame_id')}"
+            )
             current = measured
 
         final = (heading - current) % 360
         if final > 180:
             final -= 360
         if abs(final) <= tolerance:
+            trace.append(f"done at {current:.0f}deg, {final:+.0f} off target")
             return
 
+        trace.append(f"gave up at {current:.0f}deg, {final:+.0f} off target")
         raise HomeAssistantError(
             f"{self.device_name} did not reach {heading}° within {max_attempts} attempts "
             f"(stopped at {current}°)"

@@ -230,6 +230,7 @@ async def async_setup_entry(
             ),
         },
         "async_rotate_to_heading",
+        supports_response=SupportsResponse.OPTIONAL,
     )
     platform.async_register_entity_service(
         SERVICE_GO_TO_POINT,
@@ -397,8 +398,8 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         quiet: bool = True,
         camera_settle: float | None = None,
         use_camera_session: bool = True,
-    ) -> None:
-        await self.coordinator.async_rotate_to_heading(
+    ) -> dict:
+        return await self.coordinator.async_rotate_to_heading(
             heading,
             tolerance=tolerance,
             max_attempts=max_attempts,
