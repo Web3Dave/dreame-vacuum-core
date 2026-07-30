@@ -166,7 +166,7 @@ class RunReporter:
 
     def __init__(self, coordinator: "DreameCoordinator", command: str) -> None:
         self._coordinator = coordinator
-        self._command = command
+        self.command = command
         self._id: int | None = None
 
     async def start(self) -> None:
@@ -174,12 +174,12 @@ class RunReporter:
         if not companion:
             return
         try:
-            self._id = await companion.async_start_run(self._coordinator.did, self._command)
+            self._id = await companion.async_start_run(self._coordinator.did, self.command)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Could not open a run record: %s", err)
 
     async def step(self, text: str) -> None:
-        _LOGGER.debug("%s: %s", self._command, text)
+        _LOGGER.debug("%s: %s", self.command, text)
         if self._id is None or not self._coordinator.companion:
             return
         try:
@@ -982,6 +982,69 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self._async_record_run(run, owns, result)
         return result
+
+    async def async_start_task(self, task: str) -> dict:
+        """Run a task the add-on holds, by its human-readable id.
+
+        The steps are expanded by the add-on and performed here as ordinary
+        service calls, so a task does exactly what its exported script would.
+        """
+        if not self.companion:
+            raise HomeAssistantError(
+                f"{self.device_name} has no companion add-on configured, "
+                "which is where tasks live"
+            )
+        if self._run is not None:
+            raise HomeAssistantError(
+                f"{self.device_name} is already busy with '{self._run.command}'. "
+                "Wait for it to finish, or stop the vacuum"
+            )
+
+        payload = await self.companion.async_task_calls(task)
+        if payload is None:
+            raise HomeAssistantError("Could not reach the companion add-on")
+        if payload.get("error"):
+            available = ", ".join(
+                t["slug"] for t in await self.companion.async_list_tasks(self.did)
+            )
+            raise HomeAssistantError(
+                f"Cannot run task '{task}': {payload['error']}"
+                + (f". Available: {available}" if available else "")
+            )
+
+        definition = payload.get("task") or {}
+        if str(definition.get("did")) != str(self.did):
+            raise HomeAssistantError(
+                f"Task '{task}' belongs to another vacuum. Its coordinates are "
+                "in that robot's map and would send this one somewhere arbitrary"
+            )
+
+        calls = payload.get("calls") or []
+        run, owns = await self._async_begin_run(f"task:{task}")
+        await run.step(f"{definition.get('name', task)}: {len(calls)} steps")
+
+        try:
+            for index, call in enumerate(calls, start=1):
+                domain, _, service = call["action"].partition(".")
+                data = call.get("data") or {}
+                await run.step(
+                    f"step {index}/{len(calls)}: {call['action']}"
+                    + (f" {data}" if data else "")
+                )
+                await self.hass.services.async_call(
+                    domain, service, {**data, **call.get("target", {})}, blocking=True
+                )
+        except Exception as err:  # noqa: BLE001 - reported, then re-raised
+            await self._async_end_run(
+                run, owns, False, f"Failed at step {index} of {len(calls)}",
+                {"error": str(err)},
+            )
+            raise HomeAssistantError(f"Task '{task}' failed at step {index}: {err}") from err
+
+        await self._async_end_run(
+            run, owns, True, f"Completed {len(calls)} steps", {}
+        )
+        return {"task": task, "steps": len(calls)}
 
     async def _async_begin_run(self, command: str) -> tuple[RunReporter, bool]:
         """Start narrating a command, or join the errand already narrating.

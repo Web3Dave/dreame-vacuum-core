@@ -193,6 +193,8 @@ ATTR_USE_STREAM = "use_stream"
 ATTR_STOP_STREAM = "stop_stream"
 
 SERVICE_TAKE_SNAPSHOT = "take_snapshot"
+SERVICE_START_TASK = "start_task"
+ATTR_TASK = "task"
 ATTR_TAG = "tag"
 
 
@@ -244,6 +246,12 @@ async def async_setup_entry(
             vol.Optional(ATTR_FILENAME): cv.string,
         },
         "async_take_snapshot",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        SERVICE_START_TASK,
+        {vol.Required(ATTR_TASK): cv.string},
+        "async_start_task",
         supports_response=SupportsResponse.OPTIONAL,
     )
     platform.async_register_entity_service(
@@ -481,3 +489,6 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         self, tag: str | None = None, filename: str | None = None
     ) -> dict:
         return await self.coordinator.async_take_snapshot(tag, filename)
+
+    async def async_start_task(self, task: str) -> dict:
+        return await self.coordinator.async_start_task(task)

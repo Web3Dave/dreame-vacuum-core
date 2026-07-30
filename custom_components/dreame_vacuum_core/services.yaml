@@ -336,3 +336,23 @@ take_snapshot:
         missing.
       selector:
         text:
+
+start_task:
+  name: Start a task
+  description: >-
+    Run a task defined in the companion add-on, by its id. Tasks are authored
+    in the add-on's Tasks tab; this is how an automation triggers one.
+  target:
+    entity:
+      integration: dreame_vacuum_core
+      domain: vacuum
+  fields:
+    task:
+      name: Task
+      description: >-
+        The task's id, as shown in the add-on's Tasks tab, for example
+        poop_check. A task belongs to one vacuum and will not run on another.
+      required: true
+      example: poop_check
+      selector:
+        text:

@@ -163,6 +163,40 @@ class CompanionClient:
                 self._warned = True
             return None
 
+    async def async_task_calls(self, slug: str) -> dict | None:
+        """A task expanded into service calls, or None if unreachable.
+
+        Deliberately asks the add-on rather than expanding steps here: the
+        add-on owns the step schema, and a second implementation of that
+        expansion would drift from the one the export uses.
+        """
+        try:
+            async with self._session.get(
+                f"{self._base}/tasks/{slug}/calls",
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                return {"error": (await resp.text())[:300], "status": resp.status}
+        except (aiohttp.ClientError, TimeoutError) as err:
+            _LOGGER.warning("Could not fetch task %s: %s", slug, err)
+            return None
+
+    async def async_list_tasks(self, did: str | None = None) -> list[dict]:
+        try:
+            async with self._session.get(
+                f"{self._base}/tasks",
+                params={"did": did} if did else None,
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                return (await resp.json()).get("tasks") or []
+        except (aiohttp.ClientError, TimeoutError):
+            return []
+
     async def async_start_run(self, did: str, command: str) -> int | None:
         """Open a run record; steps stream against the returned id.
 
