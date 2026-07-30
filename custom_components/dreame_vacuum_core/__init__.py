@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import logging
 
+from pathlib import Path
+
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -22,7 +25,31 @@ PLATFORMS: list[Platform] = [
 ]
 
 
+# Served to whoever draws a map - the add-on's panel today, a Lovelace card
+# next. One copy so the coordinate transform cannot drift between them, which
+# is exactly how a click once landed mirrored about the middle of the map.
+MAP_MODULE_URL = "/dreame_vacuum_core/map.js"
+
+
+async def _async_serve_map_module(hass: HomeAssistant) -> None:
+    if hass.data.get(f"{DOMAIN}_static"):
+        return
+    hass.data[f"{DOMAIN}_static"] = True
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                MAP_MODULE_URL,
+                str(Path(__file__).parent / "www" / "map.js"),
+                # Cached by the browser; callers bust it with the version.
+                True,
+            )
+        ]
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    await _async_serve_map_module(hass)
+
     model = {**entry.data, **entry.options}.get(CONF_MODEL) or "unknown"
     profile = await hass.async_add_executor_job(load_profile, model)
 

@@ -198,7 +198,9 @@ class CompanionClient:
         except (aiohttp.ClientError, TimeoutError):
             return []
 
-    async def async_publish_map(self, did: str, png: bytes, meta: dict) -> bool:
+    async def async_publish_map(
+        self, did: str, png: bytes, meta: dict, document: dict | None = None
+    ) -> bool:
         """Upload a rendered map and its geometry.
 
         Multipart rather than JSON: base64 would inflate the image by a third
@@ -213,6 +215,10 @@ class CompanionClient:
             form = aiohttp.FormData()
             form.add_field("did", did)
             form.add_field("meta", json.dumps(meta), content_type="application/json")
+            if document is not None:
+                form.add_field(
+                    "document", json.dumps(document), content_type="application/json"
+                )
             form.add_field("image", png, filename="map.png", content_type="image/png")
             try:
                 async with self._session.post(

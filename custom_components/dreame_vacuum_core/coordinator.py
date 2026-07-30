@@ -63,7 +63,7 @@ from .const import (
     SIID_DEVICE_KEEP_ALIVE,
 )
 from .map_data import decode_frame, decode_position
-from .map_render import metadata as map_metadata, render_png
+from .map_render import map_document, metadata as map_metadata, render_png
 from .profile import DeviceProfile, load_profile
 from .transport import DreameVacuumProtocol
 
@@ -1105,8 +1105,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         meta = map_metadata(frame, scale)
-        await run.step(f"rendered {len(png)} bytes, uploading")
-        if not await self.companion.async_publish_map(self.did, png, meta):
+        document = map_document(frame, scale)
+        await run.step(
+            f"rendered {len(png)} bytes, {len(document['grid'])} of grid, uploading"
+        )
+        if not await self.companion.async_publish_map(self.did, png, meta, document):
             raise await refuse(
                 "Upload refused", "The add-on would not accept the map - check its log"
             )

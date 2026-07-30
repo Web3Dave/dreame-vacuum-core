@@ -10,6 +10,7 @@ what can fetch a frame, and Home Assistant already ships Pillow.
 """
 from __future__ import annotations
 
+import base64
 import io
 import logging
 
@@ -87,6 +88,34 @@ def metadata(frame: dict, scale: int = 5) -> dict:
         "robot": frame.get("robot"),
         "angle": frame.get("angle"),
         "rooms": sorted({v >> 2 for v in frame["grid"] if v and (v >> 2) != WALL_SEGMENT}),
+    }
+
+
+MAP_DOCUMENT_VERSION = 1
+
+
+def map_document(frame: dict, scale: int = 5) -> dict:
+    """The map as data, for a client that renders it itself.
+
+    Sent instead of only a picture so the viewer decides what to draw: room
+    names on or off, a room highlighted, the robot and its field of view drawn
+    over the top - none of which should cost a server round trip, because the
+    robot moves far more often than the map changes.
+
+    `version` is here from the start: once a dashboard card reads this, its
+    shape is an interface.
+    """
+    return {
+        "version": MAP_DOCUMENT_VERSION,
+        "map_id": frame.get("map_id"),
+        "grid_size": frame["grid_size"],
+        "origin": frame["origin"],
+        "cells": [frame["width"], frame["height"]],
+        "rooms": sorted({v >> 2 for v in frame["grid"] if v and (v >> 2) != WALL_SEGMENT}),
+        "grid": base64.b64encode(frame["grid"]).decode("ascii"),
+        "robot": frame.get("robot"),
+        "angle": frame.get("angle"),
+        "suggested_scale": scale,
     }
 
 
