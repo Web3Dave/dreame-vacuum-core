@@ -798,9 +798,36 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if started_here:
             await self.companion.async_stream_stop(self.did)
+
+        await self._async_record_run("inspect_point", result)
+
         if return_to_dock:
             await self.async_action("Battery", "StartCharge")
         return result
+
+    async def _async_record_run(self, command: str, result: dict) -> None:
+        """Push the outcome to the add-on so the UI can show it."""
+        if not self.companion:
+            return
+        if result.get("arrived"):
+            summary = (
+                f"Arrived at ({result.get('x')}, {result.get('y')}) "
+                f"facing {result.get('heading')}\u00b0"
+            )
+        else:
+            summary = (
+                f"Did not arrive - ended at ({result.get('x')}, {result.get('y')}) "
+                f"facing {result.get('heading')}\u00b0"
+            )
+        detail = {"trace": result.get("rotation") or [], "photo": result.get("photo")}
+        if result.get("error"):
+            detail["error"] = result["error"]
+        try:
+            await self.companion.async_log_run(
+                self.did, command, bool(result.get("arrived")), summary, detail
+            )
+        except Exception as err:  # noqa: BLE001 - logging must not break the errand
+            _LOGGER.debug("Could not record the run: %s", err)
 
     async def _async_capture_to(self, filename: str | None, creds: tuple) -> str | None:
         """Take a fresh photo and optionally copy it where the caller asked."""
