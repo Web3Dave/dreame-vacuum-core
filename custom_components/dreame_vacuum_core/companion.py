@@ -163,19 +163,25 @@ class CompanionClient:
                 self._warned = True
             return None
 
-    async def async_log_run(
-        self, did: str, command: str, ok: bool, summary: str, detail: dict
-    ) -> bool:
-        """Record an errand for the add-on's Activity page.
+    async def async_start_run(self, did: str, command: str) -> int | None:
+        """Open a run record; steps stream against the returned id.
 
-        Best-effort: losing a log entry must never affect the errand itself.
+        Best-effort throughout: losing the log must never affect the errand.
         """
-        result = await self._post(
-            "/runs",
-            {"did": did, "command": command, "ok": ok, "summary": summary, "detail": detail},
+        result = await self._post("/runs", {"did": did, "command": command}, timeout=10)
+        return (result or {}).get("id")
+
+    async def async_run_step(self, run_id: int, text: str) -> None:
+        await self._post(f"/runs/{run_id}/steps", {"text": text}, timeout=10)
+
+    async def async_finish_run(
+        self, run_id: int, ok: bool, summary: str, detail: dict
+    ) -> None:
+        await self._post(
+            f"/runs/{run_id}/finish",
+            {"ok": ok, "summary": summary, "detail": detail},
             timeout=10,
         )
-        return bool(result and result.get("success"))
 
     async def async_capture(
         self, username: str, password: str, country: str, pin: str, did: str

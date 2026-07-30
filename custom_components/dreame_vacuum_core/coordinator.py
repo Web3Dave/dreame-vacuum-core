@@ -148,6 +148,46 @@ def device_display_name(record: dict) -> str:
     )
 
 
+class RunReporter:
+    """Narrates an errand to the add-on's Activity page, step by step.
+
+    Every call is best-effort and swallows its own failures: a missing log
+    entry must never change what the robot does. When no add-on is configured
+    this is a no-op, so callers need no conditionals.
+    """
+
+    def __init__(self, coordinator: "DreameCoordinator", command: str) -> None:
+        self._coordinator = coordinator
+        self._command = command
+        self._id: int | None = None
+
+    async def start(self) -> None:
+        companion = self._coordinator.companion
+        if not companion:
+            return
+        try:
+            self._id = await companion.async_start_run(self._coordinator.did, self._command)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not open a run record: %s", err)
+
+    async def step(self, text: str) -> None:
+        _LOGGER.debug("%s: %s", self._command, text)
+        if self._id is None or not self._coordinator.companion:
+            return
+        try:
+            await self._coordinator.companion.async_run_step(self._id, text)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not record a run step: %s", err)
+
+    async def finish(self, ok: bool, summary: str, detail: dict) -> None:
+        if self._id is None or not self._coordinator.companion:
+            return
+        try:
+            await self._coordinator.companion.async_finish_run(self._id, ok, summary, detail)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not close a run record: %s", err)
+
+
 class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Owns the device connection, state and profile."""
 
@@ -180,6 +220,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._keep_alive_cancel = None
         self._warned_no_pin = False
         self.last_rotation: dict | None = None
+        self._run: RunReporter | None = None
 
         self.companion: CompanionClient | None = None
         if cfg.get(CONF_ENABLE_CAMERA) and cfg.get(CONF_COMPANION_TOKEN):
@@ -404,6 +445,36 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.device_name, timeout, before,
         )
         return None
+
+    async def async_settled_heading(
+        self, timeout: float = 45.0, tolerance: float = 2.0
+    ) -> float | None:
+        """Wait until the heading stops changing, then return it.
+
+        The first frame after a turn is often captured mid-rotation, so the
+        robot is still moving when it is measured - the value then changes
+        again seconds later. Correcting against that reading makes the loop
+        chase a robot that has already moved on. Two consecutive frames
+        agreeing means it has actually stopped.
+        """
+        deadline = time.monotonic() + timeout
+        previous: float | None = None
+        while time.monotonic() < deadline:
+            reading = await self.async_refresh_position(
+                timeout=max(5.0, deadline - time.monotonic())
+            )
+            if reading is None:
+                return previous
+            if previous is not None:
+                drift = ((reading - previous + 180) % 360) - 180
+                if abs(drift) <= tolerance:
+                    return reading
+                _LOGGER.debug(
+                    "%s still turning: %.0f -> %.0f, waiting for it to settle",
+                    self.device_name, previous, reading,
+                )
+            previous = reading
+        return previous
 
     def _position_diagnosis(self) -> str:
         """A specific reason rather than a generic failure.
@@ -751,6 +822,15 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "which is needed to take a photo"
             )
 
+        run = RunReporter(self, "inspect_point")
+        await run.start()
+        self._run = run
+        await run.step(
+            f"target ({x}, {y})"
+            + (f" facing {heading:.0f}\u00b0" if heading is not None else "")
+            + f", within {arrival_tolerance}mm"
+        )
+
         cfg = self.config
         creds = (
             cfg[CONF_USERNAME], cfg[CONF_PASSWORD],
@@ -761,14 +841,18 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # else's stream at the end would be a surprise.
         started_here = False
         if not await self.companion.async_stream_status(self.did):
+            await run.step("starting a camera stream")
             if await self.companion.async_stream_start(*creds, self.did):
                 started_here = True
-                _LOGGER.debug("Opened a stream for the inspection of %s", self.device_name)
+                await run.step("stream open")
             else:
+                await run.step("stream would not start - the turn will run the brushes")
                 _LOGGER.warning(
                     "Could not start a stream for %s; the turn will run the brushes "
                     "and the photo may be stale", self.device_name,
                 )
+        else:
+            await run.step("a stream was already running, reusing it")
 
         result: dict[str, Any] = {"arrived": False, "photo": None}
         try:
@@ -782,15 +866,20 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 use_camera_session=not started_here,
             )
             result["arrived"] = True
+            await run.step("arrived")
         except HomeAssistantError as err:
             # Photograph wherever it got to - that picture is often the point.
             result["error"] = str(err)
+            await run.step(f"failed: {err}")
             _LOGGER.warning("Inspection of %s did not arrive: %s", self.device_name, err)
 
         if self.last_rotation:
             result["rotation"] = self.last_rotation.get("trace")
 
+        await run.step("taking a photo")
         result["photo"] = await self._async_capture_to(filename, creds)
+        await run.step(f"photo saved to {result['photo']}" if result["photo"]
+                       else "photo failed")
 
         if self.position:
             result.update({k: self.position.get(v) for k, v in
@@ -798,17 +887,27 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if started_here:
             await self.companion.async_stream_stop(self.did)
-
-        await self._async_record_run("inspect_point", result)
+            await run.step("stream closed")
 
         if return_to_dock:
+            await run.step("returning to the dock")
             await self.async_action("Battery", "StartCharge")
+
+        await self._async_record_run(run, result)
+        self._run = None
         return result
 
-    async def _async_record_run(self, command: str, result: dict) -> None:
-        """Push the outcome to the add-on so the UI can show it."""
-        if not self.companion:
-            return
+    async def _async_step(self, text: str) -> None:
+        """Report a step if an errand is narrating itself, otherwise nothing.
+
+        Lets the drive and rotation stages narrate without every one of them
+        having to know whether a run is being recorded.
+        """
+        if self._run is not None:
+            await self._run.step(text)
+
+    async def _async_record_run(self, run: "RunReporter", result: dict) -> None:
+        """Close the run record with an outcome the page can summarise."""
         if result.get("arrived"):
             summary = (
                 f"Arrived at ({result.get('x')}, {result.get('y')}) "
@@ -822,12 +921,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         detail = {"trace": result.get("rotation") or [], "photo": result.get("photo")}
         if result.get("error"):
             detail["error"] = result["error"]
-        try:
-            await self.companion.async_log_run(
-                self.did, command, bool(result.get("arrived")), summary, detail
-            )
-        except Exception as err:  # noqa: BLE001 - logging must not break the errand
-            _LOGGER.debug("Could not record the run: %s", err)
+        await run.finish(bool(result.get("arrived")), summary, detail)
 
     async def _async_capture_to(self, filename: str | None, creds: tuple) -> str | None:
         """Take a fresh photo and optionally copy it where the caller asked."""
@@ -887,12 +981,15 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "%s arrived at (%s, %s), %dmm from target",
                         self.device_name, pos["x"], pos["y"], distance,
                     )
+                    await self._async_step(f"arrived {int(distance)}mm from target")
                     return
                 if closest is None or distance < closest:
                     closest = distance
                 _LOGGER.debug(
                     "%s at (%s, %s), %dmm to go", self.device_name, pos["x"], pos["y"], distance
                 )
+                if ticks % 3 == 0:
+                    await self._async_step(f"driving, {int(distance)}mm to go")
 
             # The device gives up quietly - an unreachable or off-map target
             # ends the task and it just sits there. Waiting out the full
@@ -1051,6 +1148,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.device_name, current, diff, heading,
                 )
                 trace.append(f"done at {current:.0f}deg, {diff:+.0f} off target")
+                await self._async_step(f"heading reached: {current:.0f}\u00b0, {diff:+.0f} off")
                 return
 
             step = diff * damping
@@ -1073,10 +1171,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # attempt. Wait longer for bigger turns.
             await asyncio.sleep(min(settle + abs(step) * 0.15, 20.0))
 
-            # Strict, and with a longer window: this is the measurement the
-            # next correction depends on, and it has to reflect the turn that
-            # just happened rather than the frame from before it.
-            measured = await self.async_refresh_position(timeout=35.0)
+            # Strict, and waits for the robot to stop: this is the measurement
+            # the next correction depends on, so it has to reflect where the
+            # turn finished rather than a frame from part-way through it.
+            measured = await self.async_settled_heading()
             if measured is None:
                 trace.append(f"{attempt}: commanded {step:+.0f}, NO new map frame")
                 raise HomeAssistantError(
@@ -1091,11 +1189,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ((measured - current + 180) % 360) - 180,
                 (self.position or {}).get("frame_id"),
             )
-            trace.append(
-                f"{attempt}: at {current:.0f}, commanded {step:+.0f}, "
-                f"now {measured:.0f} (turned {((measured - current + 180) % 360) - 180:+.0f}) "
-                f"frame {(self.position or {}).get('frame_id')}"
+            line = (
+                f"turn {attempt}: at {current:.0f}\u00b0, commanded {step:+.0f}\u00b0, "
+                f"settled at {measured:.0f}\u00b0 "
+                f"(turned {((measured - current + 180) % 360) - 180:+.0f}\u00b0)"
             )
+            trace.append(line)
+            await self._async_step(line)
             current = measured
 
         final = (heading - current) % 360
@@ -1106,6 +1206,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         trace.append(f"gave up at {current:.0f}deg, {final:+.0f} off target")
+        await self._async_step(f"gave up at {current:.0f}\u00b0, {final:+.0f} off target")
         raise HomeAssistantError(
             f"{self.device_name} did not reach {heading}° within {max_attempts} attempts "
             f"(stopped at {current}°)"
