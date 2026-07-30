@@ -30,6 +30,7 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
 )
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -1000,27 +1001,38 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Wait for it to finish, or stop the vacuum"
             )
 
+        # The run opens before anything can fail, so a refusal shows up on the
+        # Activity page. Home Assistant returns a bare 500 for a service error
+        # and puts the reason only in its own log, which is no use to someone
+        # looking at the panel.
+        run, owns = await self._async_begin_run(f"task:{task}")
+
+        async def refuse(summary: str, detail: str) -> HomeAssistantError:
+            await self._async_end_run(run, owns, False, summary, {"error": detail})
+            return HomeAssistantError(detail)
+
         payload = await self.companion.async_task_calls(task)
         if payload is None:
-            raise HomeAssistantError("Could not reach the companion add-on")
+            raise await refuse("Add-on unreachable", "Could not reach the companion add-on")
         if payload.get("error"):
             available = ", ".join(
                 t["slug"] for t in await self.companion.async_list_tasks(self.did)
             )
-            raise HomeAssistantError(
+            raise await refuse(
+                f"Cannot run '{task}'",
                 f"Cannot run task '{task}': {payload['error']}"
-                + (f". Available: {available}" if available else "")
+                + (f". Available: {available}" if available else ""),
             )
 
         definition = payload.get("task") or {}
         if str(definition.get("did")) != str(self.did):
-            raise HomeAssistantError(
+            raise await refuse(
+                "Wrong vacuum",
                 f"Task '{task}' belongs to another vacuum. Its coordinates are "
-                "in that robot's map and would send this one somewhere arbitrary"
+                "in that robot's map and would send this one somewhere arbitrary",
             )
 
         calls = payload.get("calls") or []
-        run, owns = await self._async_begin_run(f"task:{task}")
         await run.step(f"{definition.get('name', task)}: {len(calls)} steps")
 
         try:
@@ -1581,15 +1593,28 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "did": self.did,
                 "name": self.device_name,
                 "model": self.model,
-                "entities": {
-                    "vacuum": f"vacuum.{self._slug}",
-                    "camera": f"camera.{self._slug}",
-                    "battery": f"sensor.{self._slug}_battery",
-                },
+                "entities": self._entity_ids(),
             }
         ]
         if await self.companion.async_register(self.entry.entry_id, payload):
             _LOGGER.debug("Registered %s with companion add-on", self.device_name)
+
+    def _entity_ids(self) -> dict[str, str]:
+        """Our entity ids, read from the registry rather than guessed.
+
+        Building them from the device name was wrong twice over: Home Assistant
+        may deduplicate an id, and a user who renames an entity keeps the old
+        one. The registry is the only place that actually knows. Keyed by the
+        suffix each entity was created with, which is also the vocabulary the
+        add-on's steps refer to ("stream", "vacuum", ...).
+        """
+        registry = er.async_get(self.hass)
+        prefix = f"{self.did}_"
+        out: dict[str, str] = {}
+        for entry in er.async_entries_for_config_entry(registry, self.entry.entry_id):
+            if entry.unique_id and entry.unique_id.startswith(prefix):
+                out[entry.unique_id[len(prefix):]] = entry.entity_id
+        return out
 
     @property
     def config(self) -> dict:
