@@ -217,7 +217,7 @@ async def async_setup_entry(
             vol.Optional(ATTR_MAX_ATTEMPTS, default=10): vol.All(
                 vol.Coerce(int), vol.Range(min=1, max=20)
             ),
-            vol.Optional(ATTR_DAMPING, default=0.6): vol.All(
+            vol.Optional(ATTR_DAMPING, default=0.85): vol.All(
                 vol.Coerce(float), vol.Range(min=0.1, max=1)
             ),
             vol.Optional(ATTR_SETTLE, default=4): vol.All(
@@ -393,7 +393,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         heading: float,
         tolerance: float = 1.0,
         max_attempts: int = 10,
-        damping: float = 0.6,
+        damping: float = 0.85,
         settle: float = 4.0,
         quiet: bool = True,
         camera_settle: float | None = None,

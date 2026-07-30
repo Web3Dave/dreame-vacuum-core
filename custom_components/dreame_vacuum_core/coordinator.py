@@ -75,6 +75,14 @@ CRUISE_POINT_MODE = 23
 # an angle instead - see async_turn_degrees for why.
 TURN_RATE_DPS = 45
 
+# The robot turns further than commanded, by a strikingly consistent factor:
+# measured 68->89, 44->57 and 10->13 across two runs, all 1.30. Commands are
+# divided by this, and it is refined from what each turn actually achieved -
+# an earlier attempt at learning this was abandoned because measurements were
+# being taken mid-rotation, which made the ratios meaningless.
+TURN_OVERSHOOT_DEFAULT = 1.3
+TURN_OVERSHOOT_MIN, TURN_OVERSHOOT_MAX = 0.5, 3.0
+
 # The app resends the command every second for as long as the button is held.
 # The device treats remote control as a lease: stop refreshing it and the
 # device falls back to whatever task it was in, which is what brings the
@@ -221,6 +229,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._warned_no_pin = False
         self.last_rotation: dict | None = None
         self._run: RunReporter | None = None
+        self._turn_overshoot = TURN_OVERSHOOT_DEFAULT
 
         self.companion: CompanionClient | None = None
         if cfg.get(CONF_ENABLE_CAMERA) and cfg.get(CONF_COMPANION_TOKEN):
@@ -633,6 +642,27 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "Could not restore %s.%s to %s on %s", service, prop, value, self.device_name
                 )
 
+    def _learn_overshoot(self, commanded: float, achieved: float) -> None:
+        """Refine the overshoot factor from one settled turn.
+
+        Skips turns that went the wrong way or barely moved: those mean the
+        robot was blocked or the reading was not settled after all, and would
+        drag the estimate somewhere useless.
+        """
+        if abs(commanded) < 3 or abs(achieved) < 1:
+            return
+        if (commanded > 0) != (achieved > 0):
+            return
+        observed = abs(achieved) / abs(commanded)
+        updated = self._turn_overshoot * 0.7 + observed * 0.3
+        self._turn_overshoot = max(
+            TURN_OVERSHOOT_MIN, min(TURN_OVERSHOOT_MAX, updated)
+        )
+        _LOGGER.debug(
+            "Overshoot for %s now %.2f (commanded %.0f, turned %.0f)",
+            self.device_name, self._turn_overshoot, commanded, achieved,
+        )
+
     async def async_turn_degrees(self, degrees: float) -> bool:
         """Turn by an angle, in one command.
 
@@ -647,7 +677,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         No explicit stop: the device completes the rotation itself, and
         sending zero afterwards cut the turn short.
         """
-        step = int(round(degrees))
+        # Ask for less, because the robot delivers more.
+        step = int(round(degrees / self._turn_overshoot))
         if not step:
             return True
         # The app never sends more than 180 in one press, and a larger value
@@ -1020,7 +1051,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         heading: float,
         tolerance: float = 1.0,
         max_attempts: int = 10,
-        damping: float = 0.6,
+        damping: float = 0.85,
         settle: float = 4.0,
         quiet: bool = True,
         camera_settle: float | None = None,
@@ -1161,6 +1192,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Rotation %d/%d for %s: at %.0f deg, %.0f to go, commanding %.0f",
                 attempt, max_attempts, self.device_name, current, diff, step,
             )
+            await self._async_step(
+                f"turn {attempt}: at {current:.0f}\u00b0, want {diff:+.0f}\u00b0, "
+                f"commanding {step / self._turn_overshoot:+.0f}\u00b0"
+            )
             if not await self.async_turn_degrees(step):
                 raise HomeAssistantError(f"{self.device_name} rejected the rotation command")
 
@@ -1189,10 +1224,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ((measured - current + 180) % 360) - 180,
                 (self.position or {}).get("frame_id"),
             )
+            achieved = ((measured - current + 180) % 360) - 180
+            self._learn_overshoot(step / self._turn_overshoot, achieved)
             line = (
-                f"turn {attempt}: at {current:.0f}\u00b0, commanded {step:+.0f}\u00b0, "
-                f"settled at {measured:.0f}\u00b0 "
-                f"(turned {((measured - current + 180) % 360) - 180:+.0f}\u00b0)"
+                f"turn {attempt}: settled at {measured:.0f}\u00b0 "
+                f"(turned {achieved:+.0f}\u00b0, overshoot {self._turn_overshoot:.2f})"
             )
             trace.append(line)
             await self._async_step(line)

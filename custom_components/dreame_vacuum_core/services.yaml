@@ -38,9 +38,10 @@ rotate_to_heading:
     damping:
       name: Damping
       description: >-
-        Fraction of the remaining error to correct each step. Lower is slower
-        but less likely to oscillate around the target.
-      default: 0.6
+        Fraction of the remaining error to correct each step. Each step costs
+        the better part of a minute waiting for the heading to settle, so
+        higher is faster; too high oscillates around the target.
+      default: 0.85
       selector:
         number:
           min: 0.1
