@@ -875,6 +875,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         y: int,
         heading: float | None = None,
         filename: str | None = None,
+        category: str | None = None,
         arrival_tolerance: int = 250,
         heading_tolerance: float = 5.0,
         timeout: float = 180.0,
@@ -957,9 +958,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             result["rotation"] = self.last_rotation.get("trace")
 
         await run.step("taking a photo")
-        result["photo"] = await self._async_capture_to(filename, creds)
-        await run.step(f"photo saved to {result['photo']}" if result["photo"]
-                       else "photo failed")
+        shot = await self._async_capture_to(filename, creds, category)
+        if shot:
+            result["photo"] = shot.get("copy") or shot.get("path")
+            result["snapshot"] = shot
+            await run.step(f"photo saved to {shot.get('media_path')}")
+        else:
+            await run.step("photo failed")
 
         if self.position:
             result.update({k: self.position.get(v) for k, v in
@@ -1026,7 +1031,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             detail["error"] = result["error"]
         await self._async_end_run(run, owns, bool(result.get("arrived")), summary, detail)
 
-    async def async_take_snapshot(self, filename: str | None = None) -> dict:
+    async def async_take_snapshot(
+        self, category: str | None = None, filename: str | None = None
+    ) -> dict:
         """Photograph whatever the vacuum is looking at now.
 
         Uses a running stream if there is one - a capture that has to
@@ -1047,34 +1054,47 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         streaming = await self.companion.async_stream_status(self.did)
         await run.step("using the running stream" if streaming else "capturing directly")
 
-        path = await self._async_capture_to(filename, creds)
+        shot = await self._async_capture_to(filename, creds, category)
         await self._async_end_run(
-            run, owns, path is not None,
-            f"Saved to {path}" if path else "Photo failed",
-            {"photo": path},
+            run, owns, bool(shot),
+            f"Saved to {shot.get('media_path')}" if shot else "Photo failed",
+            {"photo": (shot or {}).get("path")},
         )
-        if not path:
+        if not shot:
             raise HomeAssistantError(f"Could not take a photo of {self.device_name}")
-        return {"photo": path}
+        return shot
 
-    async def _async_capture_to(self, filename: str | None, creds: tuple) -> str | None:
-        """Take a fresh photo and optionally copy it where the caller asked."""
-        path = await self.companion.async_capture(*creds, self.did)
-        if not path:
+    async def _async_capture_to(
+        self, filename: str | None, creds: tuple, category: str | None = None
+    ) -> dict | None:
+        """Take a fresh photo, and optionally also copy it where asked.
+
+        The add-on files it under its category in the media folder; `filename`
+        is an extra copy, for somewhere Home Assistant serves over HTTP.
+        """
+        shot = await self.companion.async_capture(*creds, self.did, category)
+        if not shot or not shot.get("path"):
             _LOGGER.warning("Could not capture a photo of %s", self.device_name)
             return None
+        result = {
+            "path": shot.get("path"),
+            "latest": shot.get("latest"),
+            "category": shot.get("category"),
+            "media_path": shot.get("media_path"),
+            "latest_media_path": shot.get("latest_media_path"),
+        }
         if not filename:
-            return path
+            return result
 
         image = await self.companion.async_latest_image(self.did)
         if not image:
-            return path
+            return result
         try:
             await self.hass.async_add_executor_job(self._write_image, filename, image)
+            result["copy"] = filename
         except OSError as err:
             _LOGGER.error("Could not write the photo to %s: %s", filename, err)
-            return path
-        return filename
+        return result
 
     @staticmethod
     def _write_image(filename: str, image: bytes) -> None:

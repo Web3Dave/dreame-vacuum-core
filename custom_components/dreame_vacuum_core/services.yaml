@@ -250,12 +250,19 @@ inspect_point:
       description: Optional. Turn to face this after arriving.
       selector:
         number: {min: 0, max: 359, unit_of_measurement: "°"}
-    filename:
-      name: Save photo to
+    category:
+      name: Category
       description: >-
-        Full path to write the photo to, for example
-        /config/www/poop_check/latest.jpg. The folder is created if missing.
-        Leave empty to keep it only in the media folder.
+        Groups snapshots in the media folder, for example poop_check. Saved as
+        snapshots/<category>/<timestamp>.jpg with a latest.jpg alongside.
+        Defaults to general.
+      example: poop_check
+      selector:
+        text:
+    filename:
+      name: Also copy photo to
+      description: >-
+        Optional extra copy, for somewhere Home Assistant serves over HTTP.
       selector:
         text:
     arrival_tolerance:
@@ -312,11 +319,20 @@ take_snapshot:
       integration: dreame_vacuum_core
       domain: vacuum
   fields:
-    filename:
-      name: Save to
+    category:
+      name: Category
       description: >-
-        Full path to write the photo to, for example
-        /config/www/checks/latest.jpg. The folder is created if missing. Leave
-        empty to keep it only in the media folder.
+        Groups snapshots in the media folder, for example poop_check. Saved as
+        snapshots/<category>/<timestamp>.jpg with a latest.jpg alongside.
+        Defaults to general.
+      example: poop_check
+      selector:
+        text:
+    filename:
+      name: Also copy to
+      description: >-
+        Optional extra copy, for somewhere Home Assistant serves over HTTP -
+        for example /config/www/checks/latest.jpg. The folder is created if
+        missing.
       selector:
         text:

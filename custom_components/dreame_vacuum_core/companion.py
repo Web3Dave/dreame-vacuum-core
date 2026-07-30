@@ -184,9 +184,11 @@ class CompanionClient:
         )
 
     async def async_capture(
-        self, username: str, password: str, country: str, pin: str, did: str
-    ) -> str | None:
-        result = await self._post(
+        self, username: str, password: str, country: str, pin: str, did: str,
+        category: str | None = None,
+    ) -> dict | None:
+        """Returns the add-on's paths for the new photo, or None."""
+        return await self._post(
             "/capture",
             {
                 "username": username,
@@ -194,9 +196,9 @@ class CompanionClient:
                 "country": country,
                 "four_digit_code": pin,
                 "did": did,
+                "category": category or "general",
             },
         )
-        return (result or {}).get("path")
 
     async def async_latest_image(self, did: str) -> bytes | None:
         try:
