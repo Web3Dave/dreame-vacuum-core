@@ -189,6 +189,10 @@ SERVICE_INSPECT_POINT = "inspect_point"
 ATTR_FILENAME = "filename"
 ATTR_RETURN_TO_DOCK = "return_to_dock"
 ATTR_USE_CAMERA_SESSION = "use_camera_session"
+ATTR_USE_STREAM = "use_stream"
+ATTR_STOP_STREAM = "stop_stream"
+
+SERVICE_TAKE_SNAPSHOT = "take_snapshot"
 
 
 def _device_state_name(value) -> str | None:
@@ -230,6 +234,12 @@ async def async_setup_entry(
             ),
         },
         "async_rotate_to_heading",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        SERVICE_TAKE_SNAPSHOT,
+        {vol.Optional(ATTR_FILENAME): cv.string},
+        "async_take_snapshot",
         supports_response=SupportsResponse.OPTIONAL,
     )
     platform.async_register_entity_service(
@@ -285,6 +295,8 @@ async def async_setup_entry(
                 vol.Coerce(float), vol.Range(min=10, max=600)
             ),
             vol.Optional(ATTR_RETURN_TO_DOCK, default=True): cv.boolean,
+            vol.Optional(ATTR_USE_STREAM, default=True): cv.boolean,
+            vol.Optional(ATTR_STOP_STREAM, default=True): cv.boolean,
         },
         "async_inspect_point",
         supports_response=SupportsResponse.OPTIONAL,
@@ -448,10 +460,16 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         heading_tolerance: float = 5.0,
         timeout: float = 180.0,
         return_to_dock: bool = True,
+        use_stream: bool = True,
+        stop_stream: bool = True,
     ) -> dict:
         return await self.coordinator.async_inspect_point(
             x, y, heading=heading, filename=filename,
             arrival_tolerance=arrival_tolerance,
             heading_tolerance=heading_tolerance,
             timeout=timeout, return_to_dock=return_to_dock,
+            use_stream=use_stream, stop_stream=stop_stream,
         )
+
+    async def async_take_snapshot(self, filename: str | None = None) -> dict:
+        return await self.coordinator.async_take_snapshot(filename)

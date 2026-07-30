@@ -282,3 +282,41 @@ inspect_point:
       default: true
       selector:
         boolean:
+    use_stream:
+      name: Use a stream
+      description: >-
+        Hold one camera stream open for the whole errand. Turn off to let each
+        step open its own short camera session instead - the photo still needs
+        one either way.
+      default: true
+      selector:
+        boolean:
+    stop_stream:
+      name: Stop the stream afterwards
+      description: >-
+        Turn off to leave the stream running when finished, for instance when
+        several errands run back to back. A stream that was already running is
+        always left alone.
+      default: true
+      selector:
+        boolean:
+
+take_snapshot:
+  name: Take a snapshot
+  description: >-
+    Photograph what the vacuum is looking at now. Uses a running stream if
+    there is one, since a capture that has to open its own camera session
+    competes with anything else holding one.
+  target:
+    entity:
+      integration: dreame_vacuum_core
+      domain: vacuum
+  fields:
+    filename:
+      name: Save to
+      description: >-
+        Full path to write the photo to, for example
+        /config/www/checks/latest.jpg. The folder is created if missing. Leave
+        empty to keep it only in the media folder.
+      selector:
+        text:

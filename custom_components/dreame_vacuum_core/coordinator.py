@@ -779,9 +779,18 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cleaning task in the cruise-to-point mode and passing the target in
         the task's parameters, so that is what this sends.
         """
+        run, owns = await self._async_begin_run("go_to_point")
+        if owns:
+            await run.step(
+                f"target ({x}, {y})"
+                + (f" facing {heading:.0f}\u00b0" if heading is not None else "")
+                + f", within {arrival_tolerance}mm"
+            )
+
         mode_ids = self.profile.prop_id("VacuumExtend", "PropWorkMode")
         extend_ids = self.profile.prop_id("VacuumExtend", "PropCleanExtendData")
         if mode_ids is None or extend_ids is None:
+            await self._async_end_run(run, owns, False, "Unsupported", {})
             raise HomeAssistantError(f"{self.device_name} does not support go-to-point")
 
         # Sanity-check against the frame the coordinates belong to. Numbers
@@ -803,9 +812,17 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ],
         )
         if not ok:
-            raise HomeAssistantError(f"{self.device_name} rejected the go-to-point command")
+            message = f"{self.device_name} rejected the go-to-point command"
+            await self._async_end_run(run, owns, False, "Rejected", {"error": message})
+            raise HomeAssistantError(message)
 
-        await self._async_wait_until_arrived(int(x), int(y), arrival_tolerance, timeout)
+        try:
+            await self._async_wait_until_arrived(int(x), int(y), arrival_tolerance, timeout)
+        except HomeAssistantError as err:
+            await self._async_end_run(
+                run, owns, False, "Did not arrive", {"error": str(err)}
+            )
+            raise
 
         if heading is not None:
             # End the cruise task before rotating: it keeps control of the
@@ -814,10 +831,23 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # a paused mopping task sends the robot back to wash.
             await self.async_action("VacuumExtend", "stopClean")
             await self._async_wait_until_idle()
-            self.last_rotation = await self.async_rotate_to_heading(
-                heading, tolerance=heading_tolerance,
-                use_camera_session=use_camera_session,
-            )
+            try:
+                self.last_rotation = await self.async_rotate_to_heading(
+                    heading, tolerance=heading_tolerance,
+                    use_camera_session=use_camera_session,
+                )
+            except HomeAssistantError as err:
+                await self._async_end_run(
+                    run, owns, False, "Arrived, heading failed", {"error": str(err)}
+                )
+                raise
+
+        pos = self.position or {}
+        await self._async_end_run(
+            run, owns, True,
+            f"Arrived at ({pos.get('x')}, {pos.get('y')}) facing {pos.get('angle')}\u00b0",
+            {"trace": (self.last_rotation or {}).get("trace") or []},
+        )
 
     async def _async_wait_until_idle(self, timeout: float = 30.0) -> None:
         """Block until no task is running.
@@ -849,6 +879,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         heading_tolerance: float = 5.0,
         timeout: float = 180.0,
         return_to_dock: bool = True,
+        use_stream: bool = True,
+        stop_stream: bool = True,
     ) -> dict:
         """Drive somewhere, face a heading, photograph it, come home.
 
@@ -867,9 +899,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "which is needed to take a photo"
             )
 
-        run = RunReporter(self, "inspect_point")
-        await run.start()
-        self._run = run
+        run, owns = await self._async_begin_run("inspect_point")
         await run.step(
             f"target ({x}, {y})"
             + (f" facing {heading:.0f}\u00b0" if heading is not None else "")
@@ -885,7 +915,12 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Leave a stream that was already running alone - stopping someone
         # else's stream at the end would be a surprise.
         started_here = False
-        if not await self.companion.async_stream_status(self.did):
+        already_running = await self.companion.async_stream_status(self.did)
+        if not use_stream:
+            # Each step then opens its own short camera session instead. The
+            # photo still needs one, so this is not a no-camera mode.
+            await run.step("skipping the stream, as asked")
+        elif not already_running:
             await run.step("starting a camera stream")
             if await self.companion.async_stream_start(*creds, self.did):
                 started_here = True
@@ -896,7 +931,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "Could not start a stream for %s; the turn will run the brushes "
                     "and the photo may be stale", self.device_name,
                 )
-        else:
+        elif already_running:
             await run.step("a stream was already running, reusing it")
 
         result: dict[str, Any] = {"arrived": False, "photo": None}
@@ -930,17 +965,40 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             result.update({k: self.position.get(v) for k, v in
                            (("x", "x"), ("y", "y"), ("heading", "angle"))})
 
-        if started_here:
+        if started_here and stop_stream:
             await self.companion.async_stream_stop(self.did)
             await run.step("stream closed")
+        elif started_here:
+            await run.step("leaving the stream running, as asked")
 
         if return_to_dock:
             await run.step("returning to the dock")
             await self.async_action("Battery", "StartCharge")
 
-        await self._async_record_run(run, result)
-        self._run = None
+        await self._async_record_run(run, owns, result)
         return result
+
+    async def _async_begin_run(self, command: str) -> tuple[RunReporter, bool]:
+        """Start narrating a command, or join the errand already narrating.
+
+        Returns the reporter and whether this caller owns it. A composite like
+        inspect_point owns one run and the steps of everything it calls land in
+        it, rather than each step spawning its own entry.
+        """
+        if self._run is not None:
+            return self._run, False
+        run = RunReporter(self, command)
+        await run.start()
+        self._run = run
+        return run, True
+
+    async def _async_end_run(
+        self, run: RunReporter, owns: bool, ok: bool, summary: str, detail: dict
+    ) -> None:
+        if not owns:
+            return
+        await run.finish(ok, summary, detail)
+        self._run = None
 
     async def _async_step(self, text: str) -> None:
         """Report a step if an errand is narrating itself, otherwise nothing.
@@ -951,7 +1009,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._run is not None:
             await self._run.step(text)
 
-    async def _async_record_run(self, run: "RunReporter", result: dict) -> None:
+    async def _async_record_run(self, run: "RunReporter", owns: bool, result: dict) -> None:
         """Close the run record with an outcome the page can summarise."""
         if result.get("arrived"):
             summary = (
@@ -966,7 +1024,38 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         detail = {"trace": result.get("rotation") or [], "photo": result.get("photo")}
         if result.get("error"):
             detail["error"] = result["error"]
-        await run.finish(bool(result.get("arrived")), summary, detail)
+        await self._async_end_run(run, owns, bool(result.get("arrived")), summary, detail)
+
+    async def async_take_snapshot(self, filename: str | None = None) -> dict:
+        """Photograph whatever the vacuum is looking at now.
+
+        Uses a running stream if there is one - a capture that has to
+        negotiate its own session competes with anything else holding one, and
+        the device allows only one at a time.
+        """
+        if not self.companion:
+            raise HomeAssistantError(
+                f"{self.device_name} has no companion add-on configured, "
+                "which is needed to take a photo"
+            )
+        run, owns = await self._async_begin_run("take_snapshot")
+        cfg = self.config
+        creds = (
+            cfg[CONF_USERNAME], cfg[CONF_PASSWORD],
+            cfg.get(CONF_COUNTRY, "eu"), cfg.get(CONF_CAMERA_PIN, ""),
+        )
+        streaming = await self.companion.async_stream_status(self.did)
+        await run.step("using the running stream" if streaming else "capturing directly")
+
+        path = await self._async_capture_to(filename, creds)
+        await self._async_end_run(
+            run, owns, path is not None,
+            f"Saved to {path}" if path else "Photo failed",
+            {"photo": path},
+        )
+        if not path:
+            raise HomeAssistantError(f"Could not take a photo of {self.device_name}")
+        return {"photo": path}
 
     async def _async_capture_to(self, filename: str | None, creds: tuple) -> str | None:
         """Take a fresh photo and optionally copy it where the caller asked."""
@@ -1083,6 +1172,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.device_name, heading, tolerance,
             "set" if (self.config.get(CONF_CAMERA_PIN) or "").strip() else "MISSING",
         )
+        run, owns = await self._async_begin_run("rotate_to_heading")
+        if owns:
+            await run.step(f"target {heading:.0f}\u00b0, within {tolerance:.0f}\u00b0")
 
         # Lenient for the opening read: it only needs to know roughly where the
         # robot is pointing. Insisting on a brand new frame here fails before
@@ -1090,11 +1182,12 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # one for a long time.
         current = await self.async_refresh_position(max_age=180)
         if current is None:
-            raise HomeAssistantError(
+            message = (
                 f"Could not read {self.device_name}'s heading. "
-                f"{self._position_diagnosis()} "
-                "Enable debug logging for dreame_vacuum_core for the details."
+                f"{self._position_diagnosis()}"
             )
+            await self._async_end_run(run, owns, False, "No heading", {"error": message})
+            raise HomeAssistantError(message)
 
         # A camera session stops the firmware promoting the drive into a
         # remote-control cleaning task, which is what runs the brushes. A
@@ -1112,16 +1205,26 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             + (", camera session open" if camera else ", NO camera session")
         ]
         previous = await self._async_quieten() if quiet and not camera else {}
+        failure: str | None = None
         try:
             await self._async_rotate_loop(
                 heading, current, tolerance, max_attempts, damping, settle, camera, trace
             )
+        except HomeAssistantError as err:
+            failure = str(err)
+            raise
         finally:
             # Restore even if the rotation raised, or a failed turn would
             # silently leave the vacuum on its quietest setting.
             await self._async_restore(previous)
             if camera:
                 await self.hass.async_add_executor_job(camera.stop)
+            final = (self.position or {}).get("angle")
+            await self._async_end_run(
+                run, owns, failure is None,
+                f"Facing {final}\u00b0" if failure is None else "Heading not reached",
+                {"trace": trace, **({"error": failure} if failure else {})},
+            )
         return {
             "heading": (self.position or {}).get("angle"),
             "trace": trace,
