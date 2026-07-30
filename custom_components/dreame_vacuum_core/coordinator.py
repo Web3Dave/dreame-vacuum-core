@@ -468,20 +468,34 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         deadline = time.monotonic() + timeout
         previous: float | None = None
+        first: float | None = None
+        reads = 0
         while time.monotonic() < deadline:
             reading = await self.async_refresh_position(
                 timeout=max(5.0, deadline - time.monotonic())
             )
             if reading is None:
                 return previous
+            reads += 1
             if previous is not None:
                 drift = ((reading - previous + 180) % 360) - 180
                 if abs(drift) <= tolerance:
+                    # Reported so the value of this check is measurable: if the
+                    # first two frames always agree, the second is redundant
+                    # and a single frame would halve the time a turn costs.
+                    await self._async_step(
+                        f"  settled after {reads} frames"
+                        + (f" (first read {first:.0f}\u00b0, final {reading:.0f}\u00b0)"
+                           if first is not None and abs(
+                               ((reading - first + 180) % 360) - 180) > tolerance
+                           else "")
+                    )
                     return reading
-                _LOGGER.debug(
-                    "%s still turning: %.0f -> %.0f, waiting for it to settle",
-                    self.device_name, previous, reading,
+                await self._async_step(
+                    f"  still turning: {previous:.0f}\u00b0 -> {reading:.0f}\u00b0"
                 )
+            else:
+                first = reading
             previous = reading
         return previous
 
