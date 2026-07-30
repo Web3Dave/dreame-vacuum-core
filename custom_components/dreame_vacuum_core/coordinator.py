@@ -380,6 +380,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.hass.async_add_executor_job(self._read_map_frame)
             pos = self.position
             if pos and pos.get("frame_id") != before and pos.get("angle") is not None:
+                _LOGGER.debug(
+                    "Fresh pose for %s from frame %s (was %s): %s deg at (%s, %s)",
+                    self.device_name, pos.get("frame_id"), before,
+                    pos.get("angle"), pos.get("x"), pos.get("y"),
+                )
                 return float(pos["angle"])
 
             # Prompt another upload - one request at the start is not enough
@@ -988,7 +993,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         settle: float,
         camera: CameraSession | None = None,
     ) -> None:
-        for _ in range(int(max_attempts)):
+        for attempt in range(1, int(max_attempts) + 1):
             if camera:
                 await self.hass.async_add_executor_job(camera.keep_alive)
             # Shortest signed turn, so it never takes the long way round.
@@ -997,6 +1002,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 diff -= 360
 
             if abs(diff) <= tolerance:
+                _LOGGER.debug(
+                    "Rotation done for %s: at %.0f deg, %.0f from target %.0f",
+                    self.device_name, current, diff, heading,
+                )
                 return
 
             step = diff * damping
@@ -1005,6 +1014,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # burn every remaining attempt without moving.
                 step = 1 if diff > 0 else -1
 
+            _LOGGER.debug(
+                "Rotation %d/%d for %s: at %.0f deg, %.0f to go, commanding %.0f",
+                attempt, max_attempts, self.device_name, current, diff, step,
+            )
             if not await self.async_turn_degrees(step):
                 raise HomeAssistantError(f"{self.device_name} rejected the rotation command")
 
@@ -1025,6 +1038,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "there is no way to tell how far it went. The robot uploads map "
                     "frames on its own schedule and none arrived in time"
                 )
+            _LOGGER.debug(
+                "Rotation %d/%d for %s: commanded %.0f, measured %.0f -> %.0f "
+                "(turned %.0f) from map frame %s",
+                attempt, max_attempts, self.device_name, step, current, measured,
+                ((measured - current + 180) % 360) - 180,
+                (self.position or {}).get("frame_id"),
+            )
             current = measured
 
         final = (heading - current) % 360
