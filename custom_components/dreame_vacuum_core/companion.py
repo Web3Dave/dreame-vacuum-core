@@ -197,12 +197,26 @@ class CompanionClient:
         except (aiohttp.ClientError, TimeoutError):
             return []
 
-    async def async_start_run(self, did: str, command: str) -> int | None:
+    async def async_close_orphaned_runs(self, did: str) -> int:
+        """Close runs the add-on still thinks are in progress.
+
+        Called at startup: a Home Assistant restart ends any errand, but the
+        add-on's own history has no way to know that and would show it running
+        forever.
+        """
+        result = await self._post("/runs/reconcile", {"did": did}, timeout=10)
+        return (result or {}).get("closed", 0)
+
+    async def async_start_run(
+        self, did: str, command: str, run_id: str | None = None
+    ) -> int | None:
         """Open a run record; steps stream against the returned id.
 
         Best-effort throughout: losing the log must never affect the errand.
         """
-        result = await self._post("/runs", {"did": did, "command": command}, timeout=10)
+        result = await self._post(
+            "/runs", {"did": did, "command": command, "run_uid": run_id}, timeout=10
+        )
         return (result or {}).get("id")
 
     async def async_run_step(self, run_id: int, text: str) -> None:

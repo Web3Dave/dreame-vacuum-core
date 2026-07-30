@@ -318,6 +318,12 @@ async def async_setup_entry(
 
 class DreameVacuum(DreameEntity, StateVacuumEntity):
     _attr_name = None  # primary entity for the device
+    # Task progress ticks through every step of an errand. Recording that would
+    # fill the database with rows nobody will ever look at.
+    _unrecorded_attributes = frozenset(
+        {"task_run_id", "task_command", "task_step", "task_steps",
+         "task_detail", "task_started"}
+    )
     _attr_supported_features = (
         VacuumEntityFeature.STATE
         | VacuumEntityFeature.START
@@ -393,6 +399,13 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
             # Distinct from "no frame yet": the robot is on the map but can't
             # place itself, which is worth surfacing rather than hiding.
             attrs["located"] = c.position.get("x") is not None
+
+        # Live task state, so a dashboard or an automation can see whether this
+        # vacuum is busy - and which run to look up in the Activity tab.
+        if c.active_task:
+            attrs.update(c.active_task.as_attributes())
+        else:
+            attrs["task_running"] = False
 
         return {k: v for k, v in attrs.items() if v is not None}
 

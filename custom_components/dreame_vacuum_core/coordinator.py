@@ -21,6 +21,7 @@ import logging
 import math
 import random
 import time
+import uuid
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -157,6 +158,36 @@ def device_display_name(record: dict) -> str:
     )
 
 
+class ActiveTask:
+    """What this vacuum is doing right now, if anything.
+
+    Held by the integration because it is the thing performing the errand -
+    anything else would be inferring. Lives in memory only: a Home Assistant
+    restart ends the errand too, so there is no stale state to clean up.
+    """
+
+    def __init__(self, run_id: str, task: str | None, command: str, total: int = 0) -> None:
+        self.run_id = run_id
+        self.task = task
+        self.command = command
+        self.total = total
+        self.step = 0
+        self.detail = ""
+        self.started = time.time()
+
+    def as_attributes(self) -> dict[str, Any]:
+        return {
+            "task_running": True,
+            "task_run_id": self.run_id,
+            "task_id": self.task,
+            "task_command": self.command,
+            "task_step": self.step,
+            "task_steps": self.total or None,
+            "task_detail": self.detail or None,
+            "task_started": int(self.started),
+        }
+
+
 class RunReporter:
     """Narrates an errand to the add-on's Activity page, step by step.
 
@@ -165,9 +196,14 @@ class RunReporter:
     this is a no-op, so callers need no conditionals.
     """
 
-    def __init__(self, coordinator: "DreameCoordinator", command: str) -> None:
+    def __init__(
+        self, coordinator: "DreameCoordinator", command: str, run_id: str | None = None
+    ) -> None:
         self._coordinator = coordinator
         self.command = command
+        # Minted here so the entity attribute and the Activity entry refer to
+        # the same run; the add-on stores it alongside its own row id.
+        self.run_id = run_id or uuid.uuid4().hex[:8]
         self._id: int | None = None
 
     async def start(self) -> None:
@@ -175,9 +211,19 @@ class RunReporter:
         if not companion:
             return
         try:
-            self._id = await companion.async_start_run(self._coordinator.did, self.command)
+            self._id = await companion.async_start_run(
+                self._coordinator.did, self.command, self.run_id
+            )
         except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Could not open a run record: %s", err)
+            self._id = None
+        if self._id is None:
+            # Warn rather than whisper: when this fails, every step is dropped
+            # and the errand looks like it never happened.
+            _LOGGER.warning(
+                "Could not open an Activity record for %s - the errand will run "
+                "but will not appear in the add-on's Activity tab",
+                self._coordinator.device_name,
+            )
 
     async def step(self, text: str) -> None:
         _LOGGER.debug("%s: %s", self.command, text)
@@ -230,6 +276,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._warned_no_pin = False
         self.last_rotation: dict | None = None
         self._run: RunReporter | None = None
+        self.active_task: ActiveTask | None = None
         self._turn_overshoot = TURN_OVERSHOOT_DEFAULT
 
         self.companion: CompanionClient | None = None
@@ -262,6 +309,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.hass.async_add_executor_job(self._connect)
         except Exception as err:  # noqa: BLE001 - surfaced as a retryable setup failure
             raise ConfigEntryNotReady(f"Could not connect to {self.device_name}: {err}") from err
+
+        # A restart ended any errand that was in progress, but the add-on's
+        # history cannot know that on its own.
+        if self.companion:
+            closed = await self.companion.async_close_orphaned_runs(self.did)
+            if closed:
+                _LOGGER.info("Closed %s abandoned run(s) for %s", closed, self.device_name)
 
         # Mandatory: the device stops sending data if this lapses.
         self._keep_alive_cancel = async_track_time_interval(
@@ -1033,12 +1087,20 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         calls = payload.get("calls") or []
+        if self.active_task:
+            self.active_task.task = task
+            self.active_task.total = len(calls)
+            self._publish_task_state()
         await run.step(f"{definition.get('name', task)}: {len(calls)} steps")
 
         try:
             for index, call in enumerate(calls, start=1):
                 domain, _, service = call["action"].partition(".")
                 data = call.get("data") or {}
+                if self.active_task:
+                    self.active_task.step = index
+                    self.active_task.detail = call["action"]
+                    self._publish_task_state()
                 await run.step(
                     f"step {index}/{len(calls)}: {call['action']}"
                     + (f" {data}" if data else "")
@@ -1058,6 +1120,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         return {"task": task, "steps": len(calls)}
 
+    def _publish_task_state(self) -> None:
+        """Push the live task state out to the entity attributes."""
+        self.async_update_listeners()
+
     async def _async_begin_run(self, command: str) -> tuple[RunReporter, bool]:
         """Start narrating a command, or join the errand already narrating.
 
@@ -1070,6 +1136,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         run = RunReporter(self, command)
         await run.start()
         self._run = run
+        self.active_task = ActiveTask(run.run_id, None, command)
+        self._publish_task_state()
         return run, True
 
     async def _async_end_run(
@@ -1079,6 +1147,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         await run.finish(ok, summary, detail)
         self._run = None
+        self.active_task = None
+        self._publish_task_state()
 
     async def _async_step(self, text: str) -> None:
         """Report a step if an errand is narrating itself, otherwise nothing.
