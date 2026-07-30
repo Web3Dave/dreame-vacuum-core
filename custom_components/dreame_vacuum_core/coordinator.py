@@ -1359,10 +1359,19 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # caller already holding one (a running stream, say) passes
         # use_camera_session=False - the device allows only one at a time, so
         # opening a second would fail and leave the turn noisy.
-        camera = (
-            await self._async_open_camera_session(camera_settle)
-            if use_camera_session else None
-        )
+        camera = None
+        if use_camera_session:
+            camera = await self._async_open_camera_session(camera_settle)
+        elif self.companion and not await self.companion.async_stream_status(self.did):
+            # The caller said a stream is holding a session, but none is running
+            # - a task's steps are expanded before it runs, so a start_stream
+            # step that failed still leaves this flag set. Without this the turn
+            # would run the brushes.
+            _LOGGER.warning(
+                "%s was told a stream holds the camera session, but none is "
+                "running - opening one for the turn", self.device_name,
+            )
+            camera = await self._async_open_camera_session(camera_settle)
         # Collected rather than only logged, so a caller can report it without
         # anyone having to read the log.
         trace: list[str] = [
