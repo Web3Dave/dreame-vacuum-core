@@ -36,6 +36,11 @@ def render_png(frame: dict, scale: int = 5) -> bytes | None:
     Nearest-neighbour on purpose: a smoothed occupancy grid looks like a
     photograph of a map rather than a grid, and blurs the cell boundaries the
     coordinate maths depends on.
+
+    Rows are drawn bottom-up: the map's y axis increases upward, image rows
+    increase downward, so drawing them in order renders the flat upside down.
+    `point_to_world` inverts the same way, and the two must be changed
+    together or a click will select the wrong place.
     """
     try:
         from PIL import Image
@@ -56,7 +61,7 @@ def render_png(frame: dict, scale: int = 5) -> bytes | None:
             colour = ROOM_COLOURS[(segment - 1) % len(ROOM_COLOURS)]
             if kind == 3:
                 colour = tuple(int(channel * AREA_SHADE) for channel in colour)
-        put[index % width, index // width] = (*colour, 255)
+        put[index % width, height - 1 - index // width] = (*colour, 255)
 
     if scale > 1:
         image = image.resize((width * scale, height * scale), Image.NEAREST)
@@ -95,7 +100,8 @@ def point_to_world(frame: dict, px: float, py: float, scale: int = 5) -> tuple[i
     grid_size = frame["grid_size"]
     origin_x, origin_y = frame["origin"]
     col = px / scale
-    row = py / scale
+    # Undo the vertical flip the render applies.
+    row = (frame["height"] - 1) - py / scale
     return (
         int(origin_x + (col + 0.5) * grid_size),
         int(origin_y + (row + 0.5) * grid_size),
