@@ -875,7 +875,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         y: int,
         heading: float | None = None,
         filename: str | None = None,
-        category: str | None = None,
+        tag: str | None = None,
         arrival_tolerance: int = 250,
         heading_tolerance: float = 5.0,
         timeout: float = 180.0,
@@ -958,7 +958,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             result["rotation"] = self.last_rotation.get("trace")
 
         await run.step("taking a photo")
-        shot = await self._async_capture_to(filename, creds, category)
+        shot = await self._async_capture_to(filename, creds, tag)
         if shot:
             result["photo"] = shot.get("copy") or shot.get("path")
             result["snapshot"] = shot
@@ -1032,7 +1032,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_end_run(run, owns, bool(result.get("arrived")), summary, detail)
 
     async def async_take_snapshot(
-        self, category: str | None = None, filename: str | None = None
+        self, tag: str | None = None, filename: str | None = None
     ) -> dict:
         """Photograph whatever the vacuum is looking at now.
 
@@ -1054,7 +1054,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         streaming = await self.companion.async_stream_status(self.did)
         await run.step("using the running stream" if streaming else "capturing directly")
 
-        shot = await self._async_capture_to(filename, creds, category)
+        shot = await self._async_capture_to(filename, creds, tag)
         await self._async_end_run(
             run, owns, bool(shot),
             f"Saved to {shot.get('media_path')}" if shot else "Photo failed",
@@ -1065,21 +1065,21 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return shot
 
     async def _async_capture_to(
-        self, filename: str | None, creds: tuple, category: str | None = None
+        self, filename: str | None, creds: tuple, tag: str | None = None
     ) -> dict | None:
         """Take a fresh photo, and optionally also copy it where asked.
 
-        The add-on files it under its category in the media folder; `filename`
+        The add-on files it under its tag in the media folder; `filename`
         is an extra copy, for somewhere Home Assistant serves over HTTP.
         """
-        shot = await self.companion.async_capture(*creds, self.did, category)
+        shot = await self.companion.async_capture(*creds, self.did, tag)
         if not shot or not shot.get("path"):
             _LOGGER.warning("Could not capture a photo of %s", self.device_name)
             return None
         result = {
             "path": shot.get("path"),
             "latest": shot.get("latest"),
-            "category": shot.get("category"),
+            "tag": shot.get("tag"),
             "media_path": shot.get("media_path"),
             "latest_media_path": shot.get("latest_media_path"),
         }

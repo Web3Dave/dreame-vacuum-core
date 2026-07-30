@@ -250,11 +250,11 @@ inspect_point:
       description: Optional. Turn to face this after arriving.
       selector:
         number: {min: 0, max: 359, unit_of_measurement: "°"}
-    category:
-      name: Category
+    tag:
+      name: Tag
       description: >-
         Groups snapshots in the media folder, for example poop_check. Saved as
-        snapshots/<category>/<timestamp>.jpg with a latest.jpg alongside.
+        snapshots/<tag>/<timestamp>.jpg with a latest.jpg alongside.
         Defaults to general.
       example: poop_check
       selector:
@@ -319,11 +319,11 @@ take_snapshot:
       integration: dreame_vacuum_core
       domain: vacuum
   fields:
-    category:
-      name: Category
+    tag:
+      name: Tag
       description: >-
         Groups snapshots in the media folder, for example poop_check. Saved as
-        snapshots/<category>/<timestamp>.jpg with a latest.jpg alongside.
+        snapshots/<tag>/<timestamp>.jpg with a latest.jpg alongside.
         Defaults to general.
       example: poop_check
       selector:

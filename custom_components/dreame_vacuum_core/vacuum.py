@@ -193,7 +193,7 @@ ATTR_USE_STREAM = "use_stream"
 ATTR_STOP_STREAM = "stop_stream"
 
 SERVICE_TAKE_SNAPSHOT = "take_snapshot"
-ATTR_CATEGORY = "category"
+ATTR_TAG = "tag"
 
 
 def _device_state_name(value) -> str | None:
@@ -240,7 +240,7 @@ async def async_setup_entry(
     platform.async_register_entity_service(
         SERVICE_TAKE_SNAPSHOT,
         {
-            vol.Optional(ATTR_CATEGORY): cv.string,
+            vol.Optional(ATTR_TAG): cv.string,
             vol.Optional(ATTR_FILENAME): cv.string,
         },
         "async_take_snapshot",
@@ -289,7 +289,7 @@ async def async_setup_entry(
             vol.Required(ATTR_Y): vol.Coerce(int),
             vol.Optional(ATTR_HEADING): vol.All(vol.Coerce(float), vol.Range(min=0, max=359)),
             vol.Optional(ATTR_FILENAME): cv.string,
-            vol.Optional(ATTR_CATEGORY): cv.string,
+            vol.Optional(ATTR_TAG): cv.string,
             vol.Optional(ATTR_ARRIVAL_TOLERANCE, default=250): vol.All(
                 vol.Coerce(int), vol.Range(min=1, max=2000)
             ),
@@ -461,7 +461,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         y: int,
         heading: float | None = None,
         filename: str | None = None,
-        category: str | None = None,
+        tag: str | None = None,
         arrival_tolerance: int = 250,
         heading_tolerance: float = 5.0,
         timeout: float = 180.0,
@@ -470,7 +470,7 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         stop_stream: bool = True,
     ) -> dict:
         return await self.coordinator.async_inspect_point(
-            x, y, heading=heading, filename=filename, category=category,
+            x, y, heading=heading, filename=filename, tag=tag,
             arrival_tolerance=arrival_tolerance,
             heading_tolerance=heading_tolerance,
             timeout=timeout, return_to_dock=return_to_dock,
@@ -478,6 +478,6 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         )
 
     async def async_take_snapshot(
-        self, category: str | None = None, filename: str | None = None
+        self, tag: str | None = None, filename: str | None = None
     ) -> dict:
-        return await self.coordinator.async_take_snapshot(category, filename)
+        return await self.coordinator.async_take_snapshot(tag, filename)
