@@ -10,6 +10,7 @@ restarting.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 import aiohttp
@@ -196,6 +197,31 @@ class CompanionClient:
                 return (await resp.json()).get("tasks") or []
         except (aiohttp.ClientError, TimeoutError):
             return []
+
+    async def async_publish_map(self, did: str, png: bytes, meta: dict) -> bool:
+        """Upload a rendered map and its geometry.
+
+        Multipart rather than JSON: base64 would inflate the image by a third
+        for no benefit, and the add-on writes the bytes straight to disk.
+        """
+        form = aiohttp.FormData()
+        form.add_field("did", did)
+        form.add_field("meta", json.dumps(meta), content_type="application/json")
+        form.add_field("image", png, filename="map.png", content_type="image/png")
+        try:
+            async with self._session.post(
+                f"{self._base}/map",
+                data=form,
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.warning("Add-on rejected the map: HTTP %s", resp.status)
+                    return False
+                return True
+        except (aiohttp.ClientError, TimeoutError) as err:
+            _LOGGER.warning("Could not publish the map: %s", err)
+            return False
 
     async def async_close_orphaned_runs(self, did: str) -> int:
         """Close runs the add-on still thinks are in progress.

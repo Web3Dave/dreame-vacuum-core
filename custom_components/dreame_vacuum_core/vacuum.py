@@ -194,6 +194,8 @@ ATTR_STOP_STREAM = "stop_stream"
 
 SERVICE_TAKE_SNAPSHOT = "take_snapshot"
 SERVICE_START_TASK = "start_task"
+SERVICE_PUBLISH_MAP = "publish_map"
+ATTR_SCALE = "scale"
 ATTR_TASK = "task"
 ATTR_TAG = "tag"
 
@@ -252,6 +254,12 @@ async def async_setup_entry(
         SERVICE_START_TASK,
         {vol.Required(ATTR_TASK): cv.string},
         "async_start_task",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        SERVICE_PUBLISH_MAP,
+        {vol.Optional(ATTR_SCALE, default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=12))},
+        "async_publish_map",
         supports_response=SupportsResponse.OPTIONAL,
     )
     platform.async_register_entity_service(
@@ -505,3 +513,6 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
 
     async def async_start_task(self, task: str) -> dict:
         return await self.coordinator.async_start_task(task)
+
+    async def async_publish_map(self, scale: int = 5) -> dict:
+        return await self.coordinator.async_publish_map(scale)

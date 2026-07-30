@@ -85,6 +85,60 @@ def _decompress(raw: str, iv: str | None) -> bytes | None:
         return None
 
 
+def decode_frame(raw: str, iv: str | None = None) -> dict | None:
+    """The whole frame: header, occupancy grid and JSON trailer.
+
+    The grid is one byte per cell, encoding `segment = value >> 2` and
+    `kind = value & 3`. Segment 63 is wall; segment 0 is outside the map;
+    anything else is a room, and kind 3 marks an area within one (carpet, on
+    the map this was derived from). Verified against a real map: the robot's
+    reported position lands on floor of the room it was standing in.
+
+    `origin` is the top-left corner in millimetres, so a cell maps to the world
+    as `x = origin_x + col * grid_size` - and back the other way, which is what
+    makes a point on a rendered map selectable.
+    """
+    if not raw or len(raw) < 3:
+        return None
+    data = _decompress(raw, iv)
+    if data is None or len(data) < HEADER_SIZE:
+        return None
+
+    width, height = _int16(data, 19), _int16(data, 21)
+    if width <= 0 or height <= 0:
+        return None
+    expected = HEADER_SIZE + width * height
+    if len(data) < expected:
+        _LOGGER.debug("Map frame is short: %d bytes, expected %d", len(data), expected)
+        return None
+
+    trailer: dict = {}
+    if len(data) > expected:
+        try:
+            trailer = json.loads(data[expected:].decode("utf8")) or {}
+        except Exception:  # noqa: BLE001 - the grid is still usable without it
+            trailer = {}
+
+    origin = trailer.get("origin")
+    if not (isinstance(origin, list) and len(origin) == 2):
+        # Also in the header, and the two agreed on every frame checked.
+        origin = [_int16(data, 23), _int16(data, 25)]
+
+    angle = _int16(data, 9)
+    return {
+        "map_id": _int16(data, 0),
+        "frame_id": _int16(data, 2),
+        "grid_size": _int16(data, 17),
+        "width": width,
+        "height": height,
+        "origin": [int(origin[0]), int(origin[1])],
+        "robot": None if angle == ANGLE_UNKNOWN else [_int16(data, 5), _int16(data, 7)],
+        "angle": None if angle == ANGLE_UNKNOWN else angle,
+        "grid": data[HEADER_SIZE:expected],
+        "trailer": trailer,
+    }
+
+
 def decode_position(raw: str, iv: str | None = None) -> dict | None:
     """Read the robot's pose from a raw map property value.
 

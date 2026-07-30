@@ -62,7 +62,8 @@ from .const import (
     PROPERTY_BATCH_SIZE,
     SIID_DEVICE_KEEP_ALIVE,
 )
-from .map_data import decode_position
+from .map_data import decode_frame, decode_position
+from .map_render import metadata as map_metadata, render_png
 from .profile import DeviceProfile, load_profile
 from .transport import DreameVacuumProtocol
 
@@ -278,6 +279,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._run: RunReporter | None = None
         self.active_task: ActiveTask | None = None
         self._turn_overshoot = TURN_OVERSHOOT_DEFAULT
+        self._last_frame: str | None = None
 
         self.companion: CompanionClient | None = None
         if cfg.get(CONF_ENABLE_CAMERA) and cfg.get(CONF_COMPANION_TOKEN):
@@ -621,10 +623,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not raw:
             return False
 
-        position = decode_position(
-            raw.decode() if isinstance(raw, bytes) else str(raw),
-            self.profile.flag("AES_IV"),
-        )
+        text = raw.decode() if isinstance(raw, bytes) else str(raw)
+        self._last_frame = text
+        position = decode_position(text, self.profile.flag("AES_IV"))
         if position is None:
             _LOGGER.warning("Downloaded a map for %s but could not decode it", self.device_name)
             return False
@@ -673,6 +674,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Map property is empty - trying cloud storage instead")
             return False
 
+        self._last_frame = raw
         position = decode_position(raw, self.profile.flag("AES_IV"))
         if position is None:
             _LOGGER.warning(
@@ -1037,6 +1039,39 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self._async_record_run(run, owns, result)
         return result
+
+    async def async_publish_map(self, scale: int = 5) -> dict:
+        """Render the current map and hand it to the add-on for the UI.
+
+        The image and its origin travel together: the same pixel means a
+        different place on a map with a different origin, so a picker given one
+        without the other would quietly select the wrong point.
+        """
+        if not self.companion:
+            raise HomeAssistantError(
+                f"{self.device_name} has no companion add-on configured, "
+                "which is where the map is displayed"
+            )
+
+        await self.hass.async_add_executor_job(self._read_map_frame)
+        if not self._last_frame:
+            raise HomeAssistantError(
+                f"No map available for {self.device_name}. {self._position_diagnosis()}"
+            )
+
+        frame = decode_frame(self._last_frame, self.profile.flag("AES_IV"))
+        if frame is None:
+            raise HomeAssistantError(f"Could not decode {self.device_name}'s map")
+
+        png = await self.hass.async_add_executor_job(render_png, frame, scale)
+        if not png:
+            raise HomeAssistantError("Could not render the map - is Pillow available?")
+
+        meta = map_metadata(frame, scale)
+        if not await self.companion.async_publish_map(self.did, png, meta):
+            raise HomeAssistantError("The add-on would not accept the map")
+        _LOGGER.debug("Published a %sx%s map for %s", *meta["size"], self.device_name)
+        return meta
 
     async def async_start_task(self, task: str) -> dict:
         """Run a task the add-on holds, by its human-readable id.

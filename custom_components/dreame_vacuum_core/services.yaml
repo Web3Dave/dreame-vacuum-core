@@ -356,3 +356,23 @@ start_task:
       example: poop_check
       selector:
         text:
+
+publish_map:
+  name: Publish the map
+  description: >-
+    Render the vacuum's current map and send it to the companion add-on, where
+    it is used to pick coordinates. Called by the add-on when you open the map
+    picker; you should not normally need to run it yourself.
+  target:
+    entity:
+      integration: dreame_vacuum_core
+      domain: vacuum
+  fields:
+    scale:
+      name: Scale
+      description: Screen pixels per map cell. Higher is larger and sharper.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 12
