@@ -115,6 +115,10 @@ def map_document(frame: dict, scale: int = 5) -> dict:
         "grid": base64.b64encode(frame["grid"]).decode("ascii"),
         "robot": frame.get("robot"),
         "angle": frame.get("angle"),
+        # Optional, and older documents simply lack them - the renderer skips
+        # the dock when it has no position, so this stays version 1.
+        "dock": frame.get("charger"),
+        "dock_angle": frame.get("charger_angle"),
         "suggested_scale": scale,
     }
 

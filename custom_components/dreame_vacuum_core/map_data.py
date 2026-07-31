@@ -125,6 +125,10 @@ def decode_frame(raw: str, iv: str | None = None) -> dict | None:
         origin = [_int16(data, 23), _int16(data, 25)]
 
     angle = _int16(data, 9)
+    # Same sentinel as the angle: the dock's position is unknown until the
+    # robot has seen it on this map, and 32767 would place it 32 metres out.
+    charger_x, charger_y = _int16(data, 11), _int16(data, 13)
+    docked_known = charger_x != ANGLE_UNKNOWN and charger_y != ANGLE_UNKNOWN
     return {
         "map_id": _int16(data, 0),
         "frame_id": _int16(data, 2),
@@ -134,6 +138,8 @@ def decode_frame(raw: str, iv: str | None = None) -> dict | None:
         "origin": [int(origin[0]), int(origin[1])],
         "robot": None if angle == ANGLE_UNKNOWN else [_int16(data, 5), _int16(data, 7)],
         "angle": None if angle == ANGLE_UNKNOWN else angle,
+        "charger": [charger_x, charger_y] if docked_known else None,
+        "charger_angle": _int16(data, 15) if docked_known else None,
         "grid": data[HEADER_SIZE:expected],
         "trailer": trailer,
     }

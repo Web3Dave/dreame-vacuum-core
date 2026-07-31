@@ -18,6 +18,21 @@ export const ROOM_COLOURS = [
 ];
 const WALL_COLOUR = "#373d45";
 
+/**
+ * The vacuum's real footprint, in millimetres.
+ *
+ * Taken from the phone app, which computes its on-screen size as
+ * `320 * screenWidth / realWidth` rather than picking an icon size - so the
+ * shape on the map covers the floor the machine actually covers. That matters
+ * for a picker: a point drawn clear of a wall at icon size can be a point the
+ * vacuum physically cannot occupy.
+ */
+export const VACUUM_FOOTPRINT_MM = 320;
+/** The dock is drawn at 1.2x the vacuum, again following the app. */
+export const DOCK_SCALE = 1.2;
+/** Below this the sprite is unrecognisable, so stop shrinking. The app agrees. */
+const MIN_SPRITE_PX = 15;
+
 /** Turn the published document into something drawable. */
 export function decodeMap(doc) {
   if (!doc || !doc.grid) throw new Error("Map document has no grid");
@@ -146,16 +161,98 @@ function drawRoomNames(ctx, map, scale) {
 }
 
 /**
- * The vacuum, with a cone showing where the camera is pointing.
+ * How wide something of `mm` millimetres is on the canvas.
+ *
+ * Exported because a caller often needs it without drawing: to size a hit
+ * target, or to decide whether the vacuum is large enough on screen to be
+ * worth labelling.
+ */
+export function footprintPx(map, scale = 1, mm = VACUUM_FOOTPRINT_MM) {
+  return Math.max(MIN_SPRITE_PX, (mm / map.grid_size) * scale);
+}
+
+// Sprites, loaded once per page and shared by every canvas on it. Kept in the
+// module rather than passed around because a card that redraws on each state
+// update must not re-decode a PNG each time.
+const SPRITES = { vacuum: null, dock: null };
+let spritesPromise = null;
+
+/** Where a sprite lives - beside this module, wherever it is served from. */
+export function spriteUrl(name) {
+  return new URL(`sprites/${name}.png`, import.meta.url).href;
+}
+
+/**
+ * Fetch the sprites. Await it before the first draw for a sharp result;
+ * skip it and the drawing falls back to plain shapes, so nothing breaks if
+ * the images are missing, blocked, or this runs somewhere without a DOM.
+ */
+export function loadSprites() {
+  if (spritesPromise) return spritesPromise;
+  if (typeof Image === "undefined") {
+    spritesPromise = Promise.resolve(SPRITES);
+    return spritesPromise;
+  }
+  spritesPromise = Promise.all(
+    Object.keys(SPRITES).map((name) => new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => { SPRITES[name] = image; resolve(); };
+      // Resolve rather than reject: a missing sprite is a cosmetic problem,
+      // and a rejected promise here would take the whole map down with it.
+      image.onerror = () => resolve();
+      image.src = spriteUrl(name);
+    }))
+  ).then(() => SPRITES);
+  return spritesPromise;
+}
+
+/**
+ * Draw a sprite centred on a world coordinate, turned to face `heading`.
+ *
+ * The negated rotation is the app's, and it is not arbitrary: headings grow
+ * anticlockwise while canvas angles grow clockwise. Both sprites are drawn
+ * facing +x at 0 degrees, matching the field-of-view cone.
+ */
+function drawSprite(ctx, map, name, place, size, scale, fallback) {
+  const { x, y } = worldToPixel(map, place.x, place.y, scale);
+  const image = SPRITES[name];
+  if (!image) return fallback(x, y, size / 2);
+  ctx.save();
+  ctx.translate(x, y);
+  if (place.heading != null) ctx.rotate((-place.heading * Math.PI) / 180);
+  // The sprites are small and being scaled up; smoothing them keeps the
+  // outline round, where the map itself deliberately stays pixelated.
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(image, -size / 2, -size / 2, size, size);
+  ctx.restore();
+}
+
+/**
+ * The vacuum at its true size, with a cone showing where the camera points.
  *
  * `heading` is degrees as the device reports them; the cone is drawn about it
  * so the direction reads at a glance rather than needing the number.
  */
 export function drawVacuum(ctx, map, pose, { scale = 1, fov = 70, reach = 900,
-                                             colour = "#ff5252" } = {}) {
+                                             colour = "#ff5252", opacity = 1,
+                                             footprint = VACUUM_FOOTPRINT_MM } = {}) {
   if (!pose || pose.x == null || pose.y == null) return;
+  if (opacity !== 1) {
+    // A ghost at a candidate point: the picker draws the machine where it
+    // would end up, so its footprint against the walls is visible before
+    // anything is sent to it.
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    try {
+      drawVacuum(ctx, map, pose, { scale, fov, reach, colour, footprint });
+    } finally {
+      ctx.restore();
+    }
+    return;
+  }
   const { x, y } = worldToPixel(map, pose.x, pose.y, scale);
-  const radius = Math.max(5, scale * 1.6);
+  const size = footprintPx(map, scale, footprint);
+  const radius = size / 2;
 
   if (pose.heading != null && fov > 0) {
     const reachPx = (reach / map.grid_size) * scale;
@@ -173,13 +270,38 @@ export function drawVacuum(ctx, map, pose, { scale = 1, fov = 70, reach = 900,
     ctx.fill();
   }
 
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = colour;
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "#fff";
-  ctx.stroke();
+  drawSprite(ctx, map, "vacuum", pose, size, scale, () => {
+    // No sprite: a disc of the same footprint, with a nose for the heading.
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = colour;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#fff";
+    ctx.stroke();
+    if (pose.heading != null) {
+      const angle = (-pose.heading * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius);
+      ctx.stroke();
+    }
+  });
+}
+
+/** The dock, drawn the same way and at the same 1.2x the app uses. */
+export function drawDock(ctx, map, dock, { scale = 1, colour = "#4caf50" } = {}) {
+  if (!dock || dock.x == null || dock.y == null) return;
+  const size = footprintPx(map, scale, VACUUM_FOOTPRINT_MM * DOCK_SCALE);
+  drawSprite(ctx, map, "dock", dock, size, scale, (x, y, radius) => {
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = colour;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#fff";
+    ctx.stroke();
+  });
 }
 
 /** A labelled point - a task target, a picked coordinate. */

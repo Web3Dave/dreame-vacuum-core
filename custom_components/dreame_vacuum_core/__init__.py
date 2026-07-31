@@ -28,18 +28,26 @@ PLATFORMS: list[Platform] = [
 # Served to whoever draws a map - the add-on's panel today, a Lovelace card
 # next. One copy so the coordinate transform cannot drift between them, which
 # is exactly how a click once landed mirrored about the middle of the map.
-MAP_MODULE_URL = "/dreame_vacuum_core/map.js"
+MAP_STATIC_URL = "/dreame_vacuum_core"
+MAP_MODULE_URL = f"{MAP_STATIC_URL}/map.js"
 
 
 async def _async_serve_map_module(hass: HomeAssistant) -> None:
+    """Serve the whole `www` folder, not just the module.
+
+    The renderer draws the vacuum and dock with the phone app's own sprites,
+    which it loads relative to its own URL - so they have to be reachable
+    beside it. Registering the folder also means adding a sprite later needs
+    no change here.
+    """
     if hass.data.get(f"{DOMAIN}_static"):
         return
     hass.data[f"{DOMAIN}_static"] = True
     await hass.http.async_register_static_paths(
         [
             StaticPathConfig(
-                MAP_MODULE_URL,
-                str(Path(__file__).parent / "www" / "map.js"),
+                MAP_STATIC_URL,
+                str(Path(__file__).parent / "www"),
                 # Cached by the browser; callers bust it with the version.
                 True,
             )
