@@ -19,6 +19,9 @@
 // pair of old and new.
 const MODULE = new URL(`map.js${new URL(import.meta.url).search}`, import.meta.url).href;
 
+// Widest backing store we will allocate, in pixels.
+const MAX_CANVAS_PX = 4096;
+
 class DreameMapCard extends HTMLElement {
   static getStubConfig() {
     return { entity: "" };
@@ -37,6 +40,22 @@ class DreameMapCard extends HTMLElement {
 
   getCardSize() {
     return 6;
+  }
+
+  /**
+   * Sections dashboards lay cards out on a 12-column grid, and a custom card
+   * that says nothing gets the narrow default - which is why widening the
+   * section did not widen the map. A map is a picture of a floor: it wants
+   * the width it can get, so the default is the full row, still draggable
+   * narrower down to a quarter.
+   */
+  getGridOptions() {
+    return { columns: "full", rows: "auto", min_columns: 3, min_rows: 3 };
+  }
+
+  /** The same, under the name Home Assistant used before 2024.11. */
+  getLayoutOptions() {
+    return { grid_columns: "full", grid_rows: "auto", grid_min_columns: 3 };
   }
 
   set hass(hass) {
@@ -95,17 +114,46 @@ class DreameMapCard extends HTMLElement {
         .dm-status { color: var(--secondary-text-color); font-size: .9em;
                      margin-left: auto; }
         .dm-body { padding: 8px 12px; }
+        /* Filled to the container width. The backing store is rounded up to
+           the next whole pixel per cell, so this only ever scales down a
+           little - which is why smoothing is left on here, unlike the
+           picker, where the canvas is drawn at its natural size. */
         .dm-body canvas { width: 100%; height: auto; display: block;
-                          image-rendering: pixelated; cursor: crosshair; }
+                          cursor: crosshair; }
         .dm-foot { padding: 4px 16px 14px; min-height: 1.2em;
                    color: var(--secondary-text-color); font-size: .9em; }
         .dm-foot.dm-error { color: var(--error-color); }
       </style>`;
     this._canvas = this.querySelector("canvas");
     this._foot = this.querySelector(".dm-foot");
+    this._observe();
     this.querySelector(".dm-title").textContent = this._config.title || "Map";
     this.querySelector(".dm-refresh").addEventListener("click", () => this._fetchMap(true));
     this._canvas.addEventListener("click", (event) => this._onClick(event));
+  }
+
+  disconnectedCallback() {
+    // Editing a dashboard builds and discards cards repeatedly; an observer
+    // left attached to a detached node keeps the whole card alive with it.
+    this._observer?.disconnect();
+    this._observer = null;
+  }
+
+  connectedCallback() {
+    if (this._built) this._observe();
+  }
+
+  /**
+   * Redraw whenever the card's width changes.
+   *
+   * The card is laid out by the dashboard, not by itself, so the width it
+   * gets is only known once it is on screen - and changes when the section is
+   * widened or the browser resized.
+   */
+  _observe() {
+    if (this._observer || typeof ResizeObserver === "undefined") return;
+    this._observer = new ResizeObserver(() => this._draw());
+    this._observer.observe(this.querySelector(".dm-body"));
   }
 
   async _module() {
@@ -141,15 +189,38 @@ class DreameMapCard extends HTMLElement {
 
   // -- drawing -------------------------------------------------------------
 
+  /**
+   * Pixels per map cell, chosen from the width the card was actually given.
+   *
+   * A whole number of pixels per cell, so no cell is drawn a pixel wider than
+   * its neighbour - which on a grid of flat colours is plainly visible.
+   */
+  _scaleFor(map) {
+    const width = this._canvas?.parentElement?.clientWidth || 0;
+    if (!width) return map.suggested_scale || 5;
+    // Backing pixels, not CSS pixels: on a high-DPI screen the browser would
+    // otherwise upscale and undo the point of matching the width.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // Round *up*, so the canvas is never smaller than the box it is stretched
+    // into. Scaling a grid up leaves some cells a pixel wider than others;
+    // scaling it very slightly down does not.
+    const wanted = Math.ceil((width * dpr) / map.cols);
+    // Whatever the container, keep the backing store sane - a very wide map
+    // in a very wide browser could otherwise ask for tens of megapixels.
+    const ceiling = Math.max(2, Math.floor(MAX_CANVAS_PX / map.cols));
+    return Math.max(2, Math.min(ceiling, wanted));
+  }
+
   _draw() {
     if (!this._doc || !this._api) return;
     const map = this._doc;
-    const scale = map.suggested_scale || 5;
+    const scale = this._scaleFor(map);
     const canvas = this._canvas;
     if (canvas.width !== map.cols * scale) {
       canvas.width = map.cols * scale;
       canvas.height = map.rows * scale;
     }
+    this._scale = scale;
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     this._api.drawBase(ctx, map, { scale, showRoomNames: this._config.showRoomNames });
@@ -174,7 +245,9 @@ class DreameMapCard extends HTMLElement {
     // The canvas is displayed at whatever width fits, so translate into its
     // own pixels before asking the shared module for a coordinate.
     const ratio = canvas.width / rect.width;
-    const scale = this._doc.suggested_scale || 5;
+    // The scale the last draw used, not the document's suggestion - they part
+    // company as soon as the card is resized.
+    const scale = this._scale || this._doc.suggested_scale || 5;
     const point = this._api.pixelToWorld(
       this._doc, (event.clientX - rect.left) * ratio,
       (event.clientY - rect.top) * ratio, scale);
