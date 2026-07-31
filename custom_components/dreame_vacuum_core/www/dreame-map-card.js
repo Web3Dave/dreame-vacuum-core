@@ -22,6 +22,23 @@ const MODULE = new URL(`map.js${new URL(import.meta.url).search}`, import.meta.u
 // Widest backing store we will allocate, in pixels.
 const MAX_CANVAS_PX = 4096;
 
+/**
+ * What this instance is for.
+ *
+ * One component, several jobs: the same map, transform and sprites serve a
+ * dashboard, a point picker, and - next - a heading picker. They differ only
+ * in what they do with a gesture, so that is what the mode selects. Anything
+ * that is true of the map itself belongs in `map.js` and is shared by all of
+ * them; anything a mode needs alone belongs here.
+ *
+ * `view` is the default deliberately. On a dashboard, clicking a map reads as
+ * "send the vacuum here", so a card that quietly accepted clicks and did not
+ * send it anywhere was the wrong thing on both counts.
+ */
+const MODE_VIEW = "view";
+const MODE_PICK_POINT = "pick-point";
+const MODES = [MODE_VIEW, MODE_PICK_POINT];
+
 class DreameMapCard extends HTMLElement {
   static getStubConfig() {
     return { entity: "" };
@@ -31,10 +48,22 @@ class DreameMapCard extends HTMLElement {
     if (!config.entity || !config.entity.startsWith("vacuum.")) {
       throw new Error("dreame-map-card needs a vacuum entity, e.g. vacuum.snuffles");
     }
-    this._config = { showRoomNames: true, showDock: true, fov: 70, ...config };
+    const mode = config.mode || MODE_VIEW;
+    if (!MODES.includes(mode)) {
+      throw new Error(
+        `dreame-map-card: unknown mode ${JSON.stringify(mode)}. ` +
+        `Expected one of: ${MODES.join(", ")}`);
+    }
+    this._config = { showRoomNames: true, showDock: true, fov: 70, ...config, mode };
     this._built = false;
     this._doc = null;
     this._mapId = null;
+    this._picked = null;
+  }
+
+  /** Whether this instance takes input at all. */
+  get _interactive() {
+    return this._config.mode !== MODE_VIEW;
   }
 
   getCardSize() {
@@ -117,9 +146,8 @@ class DreameMapCard extends HTMLElement {
            the next whole pixel per cell, so this only ever scales down a
            little - which is why smoothing is left on here, unlike the
            picker, where the canvas is drawn at its natural size. */
-        /* No cursor change and no click handler: this card shows where the
-           vacuum is, it does not send it anywhere. Choosing a point is the
-           task picker's job, in the companion add-on. */
+        /* The crosshair is set from the mode, not here: in view mode the map
+           is something you look at, and a cursor promising otherwise lies. */
         .dm-body canvas { width: 100%; height: auto; display: block; }
         .dm-foot { padding: 4px 16px 14px; min-height: 1.2em;
                    color: var(--secondary-text-color); font-size: .9em; }
@@ -130,6 +158,10 @@ class DreameMapCard extends HTMLElement {
     this._observe();
     this.querySelector(".dm-title").textContent = this._config.title || "Map";
     this.querySelector(".dm-refresh").addEventListener("click", () => this._fetchMap(true));
+    if (this._interactive) {
+      this._canvas.style.cursor = "crosshair";
+      this._canvas.addEventListener("click", (event) => this._onClick(event));
+    }
   }
 
   disconnectedCallback() {
@@ -236,13 +268,62 @@ class DreameMapCard extends HTMLElement {
     if (this._pose) {
       this._api.drawVacuum(ctx, map, this._pose, { scale, fov: this._config.fov });
     }
+    // Whatever this mode has chosen, drawn last so it sits above the robot.
+    if (this._picked) this._api.drawTarget(ctx, map, this._picked, { scale });
     this.querySelector(".dm-status").textContent = this._status || "";
   }
 
-  _say(text) {
+  /**
+   * A gesture on the map, turned into a world coordinate and handed to the
+   * mode. Only the interpretation differs between modes - the transform, the
+   * refusal of walls, and the readout are the same wherever a point is being
+   * chosen, so they live here rather than in each of them.
+   */
+  _onClick(event) {
+    if (!this._doc) return;
+    const canvas = this._canvas;
+    const rect = canvas.getBoundingClientRect();
+    // The canvas is displayed at whatever width fits, so translate into its
+    // own pixels before asking the shared module for a coordinate.
+    const ratio = canvas.width / rect.width;
+    const scale = this._scale || this._doc.suggested_scale || 5;
+    const point = this._api.pixelToWorld(
+      this._doc, (event.clientX - rect.left) * ratio,
+      (event.clientY - rect.top) * ratio, scale);
+
+    const where = this._api.describePoint(this._doc, point.x, point.y);
+    if (!where.ok) {
+      // Choosing a wall produces an errand that drives about and gives up,
+      // with nothing to say why - so refuse it here instead.
+      this._picked = null;
+      this._say(`That is ${where.reason} - pick a spot on the floor.`, true);
+      this._draw();
+      return;
+    }
+
+    this._picked = point;
+    this._say(`x ${point.x}, y ${point.y} in ${where.name}`);
+    this._draw();
+    // Announced rather than acted on: this component chooses a point, it does
+    // not decide what a point means. A host - the task editor, a dialog, an
+    // automation-building card - listens and does something with it.
+    this.dispatchEvent(new CustomEvent("dreame-map-select", {
+      bubbles: true, composed: true,
+      detail: { mode: this._config.mode, x: point.x, y: point.y,
+                room: where.room, name: where.name,
+                entity: this._config.entity },
+    }));
+  }
+
+  /** The chosen point, for a host that would rather ask than listen. */
+  get selection() {
+    return this._picked ? { ...this._picked } : null;
+  }
+
+  _say(text, isError = false) {
     if (this._foot) {
       this._foot.textContent = text;
-      this._foot.classList.remove("dm-error");
+      this._foot.classList.toggle("dm-error", isError);
     }
   }
 
