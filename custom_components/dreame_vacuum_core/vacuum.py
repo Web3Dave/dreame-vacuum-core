@@ -328,9 +328,16 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
     _attr_name = None  # primary entity for the device
     # Task progress ticks through every step of an errand. Recording that would
     # fill the database with rows nobody will ever look at.
+    #
+    # The pose is excluded for a sharper reason: the robot pushes a map frame
+    # several times a second while it moves, and each one now writes state so
+    # the live map can follow it. Recorded, an hour of cleaning would be tens
+    # of thousands of rows of coordinates - and a coordinate is meaningless
+    # once the map is rebuilt, so there is nothing to gain by keeping them.
     _unrecorded_attributes = frozenset(
         {"task_run_id", "task_command", "task_step", "task_steps",
-         "task_detail", "task_started"}
+         "task_detail", "task_started",
+         "position_x", "position_y", "heading", "charger_x", "charger_y"}
     )
     _attr_supported_features = (
         VacuumEntityFeature.STATE

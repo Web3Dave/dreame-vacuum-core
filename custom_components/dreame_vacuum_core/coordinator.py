@@ -115,6 +115,11 @@ TASK_ENDED_MODES = {0, 6, 14, 17}
 
 # Properties we try to read every cycle, expressed in vocabulary terms so the
 # numeric ids come from the generated profile rather than being hardcoded.
+# The robot pushes map frames several times a second while it moves. This is
+# how often that is allowed to rewrite entity state, which is what a live map
+# on a dashboard follows.
+POSE_NOTIFY_INTERVAL = 0.5
+
 CORE_PROPERTIES: list[tuple[str, str]] = [
     ("Vacuum", "PropVacuumStatus"),     # device state enum
     ("Vacuum", "PropVacuumFault"),      # error code
@@ -267,6 +272,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # frames arrive by push on their own schedule, not from the poll.
         self.position: dict | None = None
         self._position_at: float | None = None
+        self._pose_notified_at: float = 0.0
         self._map_ids = self.profile.prop_id("CleanMap", "PropMapdata")
 
         # siid.piid -> bool; None until probed
@@ -399,9 +405,22 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             updates[f"{siid}.{piid}"] = param.get("value")
 
-        self._absorb_map_frame(updates)
+        moved = self._absorb_map_frame(updates)
 
         if not updates:
+            # A push carrying only a map frame still moved the robot, and the
+            # pose lives outside coordinator data - so without this the
+            # entity's position attributes went stale until some unrelated
+            # property happened to change. A live map is the thing that made
+            # that visible: the marker only advanced every few seconds, in
+            # steps, whenever cleaning time ticked over.
+            #
+            # Throttled because the robot pushes frames several times a second
+            # while cleaning, and every notification rewrites the state of
+            # every entity on this device. Skipping one costs at most half a
+            # second of staleness, which the next frame or poll corrects.
+            if moved and self._pose_notify_due():
+                self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
             return
 
         self._last_change = time.time()
@@ -409,25 +428,59 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, merged)
 
     # -- map / position ---------------------------------------------------
-    def _absorb_map_frame(self, updates: dict[str, Any]) -> None:
+    def _pose_notify_due(self) -> bool:
+        """Rate-limit pose-only state writes. Called from the MQTT thread."""
+        now = time.monotonic()
+        if now - self._pose_notified_at < POSE_NOTIFY_INTERVAL:
+            return False
+        self._pose_notified_at = now
+        return True
+
+    def _absorb_map_frame(self, updates: dict[str, Any]) -> bool:
         """Pull the pose out of any map frame in this batch, then drop it.
 
         Map payloads are tens of kilobytes of base64 and change constantly;
         keeping them in coordinator data would push that through every entity
         state write for no benefit.
+
+        Returns whether a pose was taken, so the caller knows there is
+        something to tell listeners about even when nothing else changed.
         """
         if self._map_ids is None:
-            return
+            return False
         raw = updates.pop(f"{self._map_ids[0]}.{self._map_ids[1]}", None)
         if not isinstance(raw, str):
-            return
+            return False
 
         position = decode_position(raw, self.profile.flag("AES_IV"))
         if position is None:
-            return
+            return False
         self.position = position
         self._position_at = time.monotonic()
         self._last_change = time.time()
+        # Kept so a dashboard card can be served the full map without asking
+        # the device for another frame - this one is as fresh as it gets.
+        self._last_frame = raw
+        return True
+
+    async def async_map_document(self, scale: int = 5, refresh: bool = False) -> dict | None:
+        """The current map as data, for whoever is drawing it.
+
+        Serves the frame already in hand by default. The robot pushes frames
+        while it moves and goes quiet when it stops, so `refresh` is for the
+        case where the last one is old - it costs a round trip to the device.
+        """
+        if refresh or not self._last_frame:
+            await self.hass.async_add_executor_job(self._read_map_frame)
+        raw = self._last_frame
+        if not raw:
+            return None
+        return await self.hass.async_add_executor_job(self._build_document, raw, scale)
+
+    def _build_document(self, raw: str, scale: int) -> dict | None:
+        """Blocking: decrypt, decompress and re-encode a frame as a document."""
+        frame = decode_frame(raw, self.profile.flag("AES_IV"))
+        return None if frame is None else map_document(frame, scale)
 
     async def async_request_map(self) -> bool:
         """Ask for a full map frame.
@@ -555,6 +608,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 first = reading
             previous = reading
         return previous
+
+    def position_diagnosis(self) -> str:
+        """Public: the same reason, for anything outside this module."""
+        return self._position_diagnosis()
 
     def _position_diagnosis(self) -> str:
         """A specific reason rather than a generic failure.

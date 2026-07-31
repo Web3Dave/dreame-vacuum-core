@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_MODEL, DOMAIN
 from .coordinator import DreameCoordinator
+from .map_view import DreameMapView
 from .profile import load_profile
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,33 +31,54 @@ PLATFORMS: list[Platform] = [
 # is exactly how a click once landed mirrored about the middle of the map.
 MAP_STATIC_URL = "/dreame_vacuum_core"
 MAP_MODULE_URL = f"{MAP_STATIC_URL}/map.js"
+MAP_CARD_URL = f"{MAP_STATIC_URL}/dreame-map-card.js"
+
+# Bumped whenever the served JavaScript changes, so a browser holding the old
+# file fetches the new one instead of failing in a way that looks like a bug
+# in the integration.
+FRONTEND_VERSION = "2"
 
 
-async def _async_serve_map_module(hass: HomeAssistant) -> None:
-    """Serve the whole `www` folder, not just the module.
+async def _async_serve_frontend(hass: HomeAssistant) -> None:
+    """Serve the `www` folder and register the dashboard card.
 
-    The renderer draws the vacuum and dock with the phone app's own sprites,
-    which it loads relative to its own URL - so they have to be reachable
-    beside it. Registering the folder also means adding a sprite later needs
-    no change here.
+    The whole folder rather than one file: the renderer draws the vacuum and
+    dock with the phone app's own sprites, which it loads relative to its own
+    URL, so they have to be reachable beside it.
+
+    The card is registered here rather than left to the user to add under
+    Settings > Dashboards > Resources, because a resource pointing at an
+    integration that has been removed is a confusing thing to leave behind.
     """
     if hass.data.get(f"{DOMAIN}_static"):
         return
     hass.data[f"{DOMAIN}_static"] = True
+
     await hass.http.async_register_static_paths(
         [
             StaticPathConfig(
                 MAP_STATIC_URL,
                 str(Path(__file__).parent / "www"),
-                # Cached by the browser; callers bust it with the version.
+                # Cached by the browser; busted by FRONTEND_VERSION.
                 True,
             )
         ]
     )
+    hass.http.register_view(DreameMapView(hass))
+
+    # Loads the card on every dashboard without a manual resource entry.
+    # Guarded: `frontend` is all but guaranteed, but a headless install can
+    # run without it and the map is not worth failing setup over.
+    try:
+        from homeassistant.components.frontend import add_extra_js_url
+
+        add_extra_js_url(hass, f"{MAP_CARD_URL}?v={FRONTEND_VERSION}")
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Could not register the map card with the frontend: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    await _async_serve_map_module(hass)
+    await _async_serve_frontend(hass)
 
     model = {**entry.data, **entry.options}.get(CONF_MODEL) or "unknown"
     profile = await hass.async_add_executor_job(load_profile, model)
