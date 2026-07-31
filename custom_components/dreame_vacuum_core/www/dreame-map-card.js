@@ -163,7 +163,7 @@ class DreameMapCard extends HTMLElement {
     if (this._pose) {
       this._api.drawVacuum(ctx, map, this._pose, { scale, fov: this._config.fov });
     }
-    if (this._picked) this._api.drawMarker(ctx, map, this._picked, { scale });
+    if (this._picked) this._api.drawTarget(ctx, map, this._picked, { scale });
     this.querySelector(".dm-status").textContent = this._status || "";
   }
 

@@ -304,7 +304,42 @@ export function drawDock(ctx, map, dock, { scale = 1, colour = "#4caf50" } = {})
   });
 }
 
-/** A labelled point - a task target, a picked coordinate. */
+/**
+ * A chosen point, drawn as the vacuum standing on it.
+ *
+ * A dot says where the coordinate is; this says what choosing it means. The
+ * ring is the machine's real 320mm outline, so a target that cannot fit
+ * between two walls looks wrong before it is saved rather than after it has
+ * been driven at.
+ */
+export function drawTarget(ctx, map, point, { scale = 1, colour = "#ff5252",
+                                              label = null, opacity = .65 } = {}) {
+  if (!point || point.x == null || point.y == null) return;
+  const { x, y } = worldToPixel(map, point.x, point.y, scale);
+  const radius = footprintPx(map, scale) / 2;
+
+  drawVacuum(ctx, map, point, { scale, fov: 0, opacity, colour });
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = colour;
+  ctx.stroke();
+  // A cross at the exact coordinate: the outline shows the footprint, but the
+  // number in the readout is this point, and at a glance the two are easy to
+  // confuse.
+  const tick = Math.max(3, radius * 0.28);
+  ctx.beginPath();
+  ctx.moveTo(x - tick, y); ctx.lineTo(x + tick, y);
+  ctx.moveTo(x, y - tick); ctx.lineTo(x, y + tick);
+  ctx.stroke();
+  ctx.restore();
+
+  if (label) drawLabel(ctx, label, x, y - radius - 3, scale);
+}
+
+/** A labelled point - kept for a plain marker where a footprint is wrong. */
 export function drawMarker(ctx, map, point, { scale = 1, colour = "#ff5252",
                                               label = null } = {}) {
   const { x, y } = worldToPixel(map, point.x, point.y, scale);
@@ -316,16 +351,21 @@ export function drawMarker(ctx, map, point, { scale = 1, colour = "#ff5252",
   ctx.lineWidth = 2;
   ctx.strokeStyle = "#fff";
   ctx.stroke();
-  if (label) {
-    ctx.font = `${Math.max(11, scale * 2.2)}px system-ui, sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(0,0,0,.55)";
-    ctx.strokeText(label, x, y - radius - 3);
-    ctx.fillStyle = "#fff";
-    ctx.fillText(label, x, y - radius - 3);
-  }
+  if (label) drawLabel(ctx, label, x, y - radius - 3, scale);
+}
+
+/** White text with a dark halo, so it reads on any room colour. */
+function drawLabel(ctx, text, x, y, scale) {
+  ctx.save();
+  ctx.font = `${Math.max(11, scale * 2.2)}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(0,0,0,.55)";
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(text, x, y);
+  ctx.restore();
 }
 
 function shade(hex, factor) {
