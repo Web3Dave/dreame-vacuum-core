@@ -222,25 +222,17 @@ class DreameMapCard extends HTMLElement {
   // -- drawing -------------------------------------------------------------
 
   /**
-   * Pixels per map cell, chosen from the width the card was actually given.
+   * Pixels per map cell for the width the card was actually given.
    *
-   * A whole number of pixels per cell, so no cell is drawn a pixel wider than
-   * its neighbour - which on a grid of flat colours is plainly visible.
+   * The maths lives in map.js (`fitScale`) so the task editor sizes its
+   * canvas identically - card and module ship together, so no version guard
+   * is needed here.
    */
   _scaleFor(map) {
     const width = this._canvas?.parentElement?.clientWidth || 0;
-    if (!width) return map.suggested_scale || 5;
-    // Backing pixels, not CSS pixels: on a high-DPI screen the browser would
-    // otherwise upscale and undo the point of matching the width.
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    // Round *up*, so the canvas is never smaller than the box it is stretched
-    // into. Scaling a grid up leaves some cells a pixel wider than others;
-    // scaling it very slightly down does not.
-    const wanted = Math.ceil((width * dpr) / map.cols);
-    // Whatever the container, keep the backing store sane - a very wide map
-    // in a very wide browser could otherwise ask for tens of megapixels.
-    const ceiling = Math.max(2, Math.floor(MAX_CANVAS_PX / map.cols));
-    return Math.max(2, Math.min(ceiling, wanted));
+    return this._api.fitScale(map, width, {
+      dpr: window.devicePixelRatio || 1, max: MAX_CANVAS_PX,
+    });
   }
 
   _draw() {

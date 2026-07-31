@@ -305,6 +305,146 @@ export function drawDock(ctx, map, dock, { scale = 1, colour = "#4caf50" } = {})
 }
 
 /**
+ * The heading from one world point toward another, in the device's own
+ * convention: degrees, 0 along +x, growing anticlockwise, 0-359.
+ *
+ * This is the whole of the drag maths for the heading editor - the editor
+ * turns a pointer position into a world point and asks this what the vacuum
+ * would then be facing. Kept here so the convention lives in exactly one
+ * place, beside the drawing code that negates it for the canvas.
+ */
+export function headingFromPoints(from, to) {
+  const degrees = (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
+  return Math.round((degrees + 360) % 360);
+}
+
+/**
+ * Where the heading editor's drag knob sits, in canvas pixels.
+ *
+ * Exported separately from the drawing so a pointer-down can be hit-tested
+ * against the same circle the user sees - a knob drawn in one place and
+ * grabbed in another is the map-mirroring bug in miniature.
+ */
+export function headingHandle(map, pose, scale = 1) {
+  const centre = worldToPixel(map, pose.x, pose.y, scale);
+  const radius = footprintPx(map, scale) / 2;
+  const reach = radius + Math.max(16, radius * 0.7);
+  const angle = (-(pose.heading || 0) * Math.PI) / 180;
+  return {
+    x: centre.x + Math.cos(angle) * reach,
+    y: centre.y + Math.sin(angle) * reach,
+    r: Math.max(10, radius * 0.4),
+    ring: reach,
+  };
+}
+
+/**
+ * The rotate control: a ring around the vacuum with a knob on it at the
+ * current heading. The vacuum itself (and its field of view) is drawn by
+ * drawVacuum - this only adds the affordance for changing it.
+ */
+export function drawHeadingHandle(ctx, map, pose, { scale = 1, colour = "#ff9800" } = {}) {
+  if (!pose || pose.x == null || pose.y == null) return;
+  const centre = worldToPixel(map, pose.x, pose.y, scale);
+  const knob = headingHandle(map, pose, scale);
+  ctx.save();
+
+  // The ring the knob travels on, dashed so it reads as a track rather than
+  // a boundary.
+  ctx.beginPath();
+  ctx.arc(centre.x, centre.y, knob.ring, 0, Math.PI * 2);
+  ctx.setLineDash([4, 5]);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = colour;
+  ctx.globalAlpha = 0.8;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+
+  // Spoke from the vacuum to the knob, so knob and machine read as one
+  // control even when the ring is faint on a busy map.
+  ctx.beginPath();
+  ctx.moveTo(centre.x, centre.y);
+  ctx.lineTo(knob.x, knob.y);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = colour;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(knob.x, knob.y, knob.r, 0, Math.PI * 2);
+  ctx.fillStyle = colour;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#fff";
+  ctx.stroke();
+
+  // Two small arrows on the ring either side of the knob: "this turns".
+  const heading = (-(pose.heading || 0) * Math.PI) / 180;
+  for (const dir of [-1, 1]) {
+    const at = heading + dir * (Math.PI / 7);
+    const ax = centre.x + Math.cos(at) * knob.ring;
+    const ay = centre.y + Math.sin(at) * knob.ring;
+    const tangent = at + (dir * Math.PI) / 2;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax + Math.cos(tangent - 0.5) * 6, ay + Math.sin(tangent - 0.5) * 6);
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax + Math.cos(tangent + 0.5) * 6, ay + Math.sin(tangent + 0.5) * 6);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = colour;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * A small camera badge beside a pose - marks "a photo is taken here" on a
+ * step that has no geometry of its own. Offset to the upper right so it does
+ * not sit on the vacuum it annotates.
+ */
+export function drawCameraBadge(ctx, map, pose, { scale = 1, colour = "#455a64" } = {}) {
+  if (!pose || pose.x == null || pose.y == null) return;
+  const centre = worldToPixel(map, pose.x, pose.y, scale);
+  const radius = footprintPx(map, scale) / 2;
+  const size = Math.max(14, radius * 0.7);
+  const x = centre.x + radius * 0.9;
+  const y = centre.y - radius * 0.9 - size;
+  ctx.save();
+  ctx.beginPath();
+  const r = 3;
+  ctx.roundRect
+    ? ctx.roundRect(x, y, size * 1.3, size, r)
+    : ctx.rect(x, y, size * 1.3, size);
+  ctx.fillStyle = colour;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#fff";
+  ctx.stroke();
+  // The lens.
+  ctx.beginPath();
+  ctx.arc(x + size * 0.65, y + size / 2, size * 0.28, 0, Math.PI * 2);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Whole pixels per cell for a canvas that should fill `cssWidth`.
+ *
+ * Shared by the dashboard card and the task editor so both size the same
+ * way: rounded up (scaling a grid of flat colours down a little is
+ * invisible; up leaves cells unevenly wide), capped so a very wide map in a
+ * very wide browser cannot ask for tens of megapixels.
+ */
+export function fitScale(map, cssWidth, { dpr = 1, max = 4096 } = {}) {
+  if (!cssWidth) return map.suggested_scale || 5;
+  const wanted = Math.ceil((cssWidth * Math.min(dpr || 1, 2)) / map.cols);
+  const ceiling = Math.max(2, Math.floor(max / map.cols));
+  return Math.max(2, Math.min(ceiling, wanted));
+}
+
+/**
  * A chosen point, drawn as the vacuum standing on it.
  *
  * A dot says where the coordinate is; this says what choosing it means. The
