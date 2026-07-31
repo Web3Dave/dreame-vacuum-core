@@ -36,7 +36,7 @@ MAP_CARD_URL = f"{MAP_STATIC_URL}/dreame-map-card.js"
 # Bumped whenever the served JavaScript changes, so a browser holding the old
 # file fetches the new one instead of failing in a way that looks like a bug
 # in the integration.
-FRONTEND_VERSION = "4"
+FRONTEND_VERSION = "5"
 
 
 async def _async_serve_frontend(hass: HomeAssistant) -> None:

@@ -35,7 +35,6 @@ class DreameMapCard extends HTMLElement {
     this._built = false;
     this._doc = null;
     this._mapId = null;
-    this._picked = null;
   }
 
   getCardSize() {
@@ -118,8 +117,10 @@ class DreameMapCard extends HTMLElement {
            the next whole pixel per cell, so this only ever scales down a
            little - which is why smoothing is left on here, unlike the
            picker, where the canvas is drawn at its natural size. */
-        .dm-body canvas { width: 100%; height: auto; display: block;
-                          cursor: crosshair; }
+        /* No cursor change and no click handler: this card shows where the
+           vacuum is, it does not send it anywhere. Choosing a point is the
+           task picker's job, in the companion add-on. */
+        .dm-body canvas { width: 100%; height: auto; display: block; }
         .dm-foot { padding: 4px 16px 14px; min-height: 1.2em;
                    color: var(--secondary-text-color); font-size: .9em; }
         .dm-foot.dm-error { color: var(--error-color); }
@@ -129,7 +130,6 @@ class DreameMapCard extends HTMLElement {
     this._observe();
     this.querySelector(".dm-title").textContent = this._config.title || "Map";
     this.querySelector(".dm-refresh").addEventListener("click", () => this._fetchMap(true));
-    this._canvas.addEventListener("click", (event) => this._onClick(event));
   }
 
   disconnectedCallback() {
@@ -220,6 +220,8 @@ class DreameMapCard extends HTMLElement {
       canvas.width = map.cols * scale;
       canvas.height = map.rows * scale;
     }
+    // Remembered because it is no longer the document's suggestion: the two
+    // part company the moment the card is resized.
     this._scale = scale;
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -234,30 +236,7 @@ class DreameMapCard extends HTMLElement {
     if (this._pose) {
       this._api.drawVacuum(ctx, map, this._pose, { scale, fov: this._config.fov });
     }
-    if (this._picked) this._api.drawTarget(ctx, map, this._picked, { scale });
     this.querySelector(".dm-status").textContent = this._status || "";
-  }
-
-  _onClick(event) {
-    if (!this._doc) return;
-    const canvas = this._canvas;
-    const rect = canvas.getBoundingClientRect();
-    // The canvas is displayed at whatever width fits, so translate into its
-    // own pixels before asking the shared module for a coordinate.
-    const ratio = canvas.width / rect.width;
-    // The scale the last draw used, not the document's suggestion - they part
-    // company as soon as the card is resized.
-    const scale = this._scale || this._doc.suggested_scale || 5;
-    const point = this._api.pixelToWorld(
-      this._doc, (event.clientX - rect.left) * ratio,
-      (event.clientY - rect.top) * ratio, scale);
-    const where = this._api.describePoint(this._doc, point.x, point.y);
-    this._picked = where.ok ? point : null;
-    this._say(where.ok
-      ? `x ${point.x}, y ${point.y} in ${where.name}`
-      : `That is ${where.reason}.`);
-    this._foot.classList.toggle("dm-error", !where.ok);
-    this._draw();
   }
 
   _say(text) {
