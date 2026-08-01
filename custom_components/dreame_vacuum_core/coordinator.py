@@ -38,7 +38,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from datetime import timedelta
 
 from .camera_session import CameraSession
-from .classify_registry import classify_webhook_url
+from .classify_registry import get_registry
 from .companion import CompanionClient
 from .const import (
     CONF_CAMERA_PIN,
@@ -1369,6 +1369,16 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not shot or not shot.get("path"):
             _LOGGER.warning("Could not capture a photo of %s", self.device_name)
             return None
+
+        # The add-on classifies inline and hands the results back on this
+        # same response - there is no separate connection or credential for
+        # that, since a photo can only ever be taken through this method in
+        # the first place (see the module docstring in classify_registry.py).
+        registry = get_registry(self.hass)
+        if registry is not None:
+            for item in shot.get("classifications") or []:
+                await registry.async_handle_result(item)
+
         result = {
             "path": shot.get("path"),
             "latest": shot.get("latest"),
@@ -1812,13 +1822,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # -- companion --------------------------------------------------------
     async def async_register_with_companion(self) -> None:
-        """Push our device identity so the add-on's UI knows what's ours.
-
-        Also pushes the classification webhook URL registered in
-        __init__.py, on every call - the add-on has nowhere else to learn
-        that URL from, and a person should never have to configure it by
-        hand.
-        """
+        """Push our device identity so the add-on's UI knows what's ours."""
         if not self.companion:
             return
         payload = [
@@ -1829,8 +1833,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "entities": self._entity_ids(),
             }
         ]
-        webhook_url = classify_webhook_url(self.hass)
-        if await self.companion.async_register(self.entry.entry_id, payload, webhook_url):
+        if await self.companion.async_register(self.entry.entry_id, payload):
             _LOGGER.debug("Registered %s with companion add-on", self.device_name)
 
     def _entity_ids(self) -> dict[str, str]:

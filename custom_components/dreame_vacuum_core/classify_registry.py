@@ -1,13 +1,14 @@
-"""Native classification entities, fed by a webhook instead of MQTT.
+"""Native classification entities, fed by the integration's own snapshot calls.
 
 The companion add-on used to broadcast classification results over MQTT
 discovery, which meant a broker, credentials, and Home Assistant's discovery
 all had to line up before a single entity appeared - and any one of those
 being wrong failed with no visible error. This replaces that path entirely:
-a webhook is registered once with Home Assistant's own webhook component,
-its URL is pushed to the add-on on every startup (see
-coordinator.async_register_with_companion), and the add-on POSTs results to
-it directly. Nothing for a person to install or configure.
+a photo can only be taken through the `vacuum.take_snapshot` service this
+integration itself implements (see coordinator._async_capture_to), whether
+that service call came from an automation or from the add-on's own UI - so
+classification results ride back on the add-on's /capture response, which
+the integration is already waiting on. Nothing else has to call in or out.
 
 Entities are created lazily, the first time a given classifier_id is seen -
 there is no way to know a classifier's class list ahead of time, since that
@@ -17,21 +18,17 @@ from __future__ import annotations
 
 import logging
 
-from aiohttp import web
-from homeassistant.components import webhook
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.network import NoURLAvailableError
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-_DATA_WEBHOOK_ID = f"{DOMAIN}_classify_webhook_id"
 _DATA_REGISTRY = f"{DOMAIN}_classify_registry"
 
 
@@ -181,46 +178,18 @@ class ClassificationRegistry:
             self._binary_add(new_binaries)
 
 
-async def async_setup_classify_webhook(hass: HomeAssistant) -> None:
-    """Register the webhook once per Home Assistant run.
+def ensure_registry(hass: HomeAssistant) -> ClassificationRegistry:
+    """The one ClassificationRegistry for this Home Assistant run.
 
     Guarded the same way _async_serve_frontend guards the static path
-    registration: multiple config entries (multiple vacuums) must not each
-    try to register the same webhook_id.
+    registration: multiple config entries (multiple vacuums) share one
+    registry rather than each creating their own.
     """
-    if hass.data.get(_DATA_WEBHOOK_ID):
-        return
-    webhook_id = webhook.async_generate_id()
-    hass.data[_DATA_WEBHOOK_ID] = webhook_id
-    hass.data[_DATA_REGISTRY] = ClassificationRegistry(hass)
-    webhook.async_register(
-        hass, DOMAIN, "Dreame classification results", webhook_id, _handle_webhook
-    )
-
-
-async def _handle_webhook(hass: HomeAssistant, webhook_id: str, request: web.Request) -> web.Response:
-    try:
-        payload = await request.json()
-    except ValueError:
-        return web.Response(status=400)
-    registry: ClassificationRegistry | None = hass.data.get(_DATA_REGISTRY)
-    if registry is not None:
-        await registry.async_handle_result(payload)
-    return web.Response(status=200)
+    registry = hass.data.get(_DATA_REGISTRY)
+    if registry is None:
+        registry = hass.data[_DATA_REGISTRY] = ClassificationRegistry(hass)
+    return registry
 
 
 def get_registry(hass: HomeAssistant) -> ClassificationRegistry | None:
     return hass.data.get(_DATA_REGISTRY)
-
-
-def classify_webhook_url(hass: HomeAssistant) -> str | None:
-    """The full URL the add-on should POST classification results to, or
-    None if Home Assistant has no usable URL yet (very early startup, or an
-    instance with no internal/external URL configured at all)."""
-    webhook_id = hass.data.get(_DATA_WEBHOOK_ID)
-    if not webhook_id:
-        return None
-    try:
-        return webhook.async_generate_url(hass, webhook_id)
-    except NoURLAvailableError:
-        return None

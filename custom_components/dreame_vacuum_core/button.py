@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .classify_registry import get_registry
 from .const import CONF_CAMERA_PIN, CONF_COUNTRY, CONF_PASSWORD, CONF_USERNAME, DOMAIN
 from .coordinator import DreameCoordinator
 from .entity import DreameEntity
@@ -37,12 +38,16 @@ class DreameSnapshotButton(DreameEntity, ButtonEntity):
     async def async_press(self) -> None:
         c = self.coordinator
         data = c.config
-        path = await c.companion.async_capture(
+        shot = await c.companion.async_capture(
             data[CONF_USERNAME],
             data[CONF_PASSWORD],
             data.get(CONF_COUNTRY, "eu"),
             data.get(CONF_CAMERA_PIN, ""),
             c.did,
         )
-        if path:
-            _LOGGER.debug("Snapshot saved: %s", path)
+        if shot:
+            _LOGGER.debug("Snapshot saved: %s", shot)
+            registry = get_registry(c.hass)
+            if registry is not None:
+                for item in shot.get("classifications") or []:
+                    await registry.async_handle_result(item)
