@@ -99,13 +99,22 @@ class CompanionClient:
         except (aiohttp.ClientError, TimeoutError):
             return None
 
-    async def async_register(self, entry_id: str, devices: list[dict]) -> bool:
+    async def async_register(
+        self, entry_id: str, devices: list[dict], classification_webhook_url: str | None = None
+    ) -> bool:
         """Tell the add-on which devices belong to this integration.
 
         The add-on cannot reliably derive this itself (the REST API exposes
         entity states but not owning integration), so we push it.
+
+        classification_webhook_url rides along here rather than its own call:
+        it is pushed on every startup regardless, the same as the device
+        list, so there is no separate trigger to wire up.
         """
-        result = await self._post("/register", {"entry_id": entry_id, "devices": devices})
+        body = {"entry_id": entry_id, "devices": devices}
+        if classification_webhook_url:
+            body["classification_webhook_url"] = classification_webhook_url
+        result = await self._post("/register", body)
         return bool(result and result.get("success"))
 
     async def async_stream_start(

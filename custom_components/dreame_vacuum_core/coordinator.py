@@ -38,6 +38,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from datetime import timedelta
 
 from .camera_session import CameraSession
+from .classify_registry import classify_webhook_url
 from .companion import CompanionClient
 from .const import (
     CONF_CAMERA_PIN,
@@ -1811,7 +1812,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # -- companion --------------------------------------------------------
     async def async_register_with_companion(self) -> None:
-        """Push our device identity so the add-on's UI knows what's ours."""
+        """Push our device identity so the add-on's UI knows what's ours.
+
+        Also pushes the classification webhook URL registered in
+        __init__.py, on every call - the add-on has nowhere else to learn
+        that URL from, and a person should never have to configure it by
+        hand.
+        """
         if not self.companion:
             return
         payload = [
@@ -1822,7 +1829,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "entities": self._entity_ids(),
             }
         ]
-        if await self.companion.async_register(self.entry.entry_id, payload):
+        webhook_url = classify_webhook_url(self.hass)
+        if await self.companion.async_register(self.entry.entry_id, payload, webhook_url):
             _LOGGER.debug("Registered %s with companion add-on", self.device_name)
 
     def _entity_ids(self) -> dict[str, str]:

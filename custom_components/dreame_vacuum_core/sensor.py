@@ -19,6 +19,7 @@ from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .classify_registry import get_registry
 from .const import DOMAIN
 from .coordinator import DreameCoordinator
 from .entity import DreameEntity
@@ -63,6 +64,14 @@ async def async_setup_entry(
             continue  # probed and absent on this unit
         entities.append(DreameSensor(coordinator, desc))
     async_add_entities(entities)
+
+    # Classification sensors (state + last-updated) are created lazily by
+    # the registry as results arrive, not listed here - there is no way to
+    # know a classifier's existence ahead of time, since it is authored
+    # entirely in the companion add-on's own UI.
+    registry = get_registry(hass)
+    if registry is not None:
+        registry.register_sensor_adder(async_add_entities)
 
 
 class DreameSensor(DreameEntity, SensorEntity):

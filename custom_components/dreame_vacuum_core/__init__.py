@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
+from .classify_registry import async_setup_classify_webhook
 from .const import CONF_MODEL, DOMAIN
 from .coordinator import DreameCoordinator
 from .map_view import DreameMapView
@@ -21,6 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [
     Platform.VACUUM,
     Platform.SENSOR,
+    Platform.BINARY_SENSOR,
     Platform.CAMERA,
     Platform.BUTTON,
     Platform.SWITCH,
@@ -81,6 +83,7 @@ async def _async_serve_frontend(hass: HomeAssistant) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_serve_frontend(hass)
+    await async_setup_classify_webhook(hass)
 
     model = {**entry.data, **entry.options}.get(CONF_MODEL) or "unknown"
     profile = await hass.async_add_executor_job(load_profile, model)
