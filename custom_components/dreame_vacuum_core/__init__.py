@@ -14,6 +14,7 @@ from .const import CONF_MODEL, DOMAIN
 from .coordinator import DreameCoordinator
 from .map_view import DreameMapView
 from .profile import load_profile
+from .snapshot_view import DreameSnapshotView
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ async def _async_serve_frontend(hass: HomeAssistant) -> None:
         ]
     )
     hass.http.register_view(DreameMapView(hass))
+    hass.http.register_view(DreameSnapshotView())
 
     # Loads the card on every dashboard without a manual resource entry.
     # Guarded: `frontend` is all but guaranteed, but a headless install can
