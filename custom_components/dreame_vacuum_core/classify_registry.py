@@ -121,6 +121,17 @@ class ClassificationRegistry:
     def register_binary_adder(self, add_entities: AddEntitiesCallback) -> None:
         self._binary_add = add_entities
 
+    def reset(self) -> None:
+        """Forget every entity and adder. Called when the config entry
+        unloads: the platform teardown removes the entities themselves, and
+        without this the registry would keep updating those detached objects
+        after a reload instead of creating fresh ones - classifications
+        would silently stop reaching Home Assistant until a full restart.
+        """
+        self._sensor_add = None
+        self._binary_add = None
+        self._classifiers = {}
+
     async def async_handle_result(self, payload: dict) -> None:
         try:
             classifier_id = str(payload["classifier_id"])

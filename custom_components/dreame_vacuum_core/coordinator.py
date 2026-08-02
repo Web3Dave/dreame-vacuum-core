@@ -1073,7 +1073,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             result["rotation"] = self.last_rotation.get("trace")
 
         await run.step("taking a photo")
-        shot = await self._async_capture_to(filename, creds, tag)
+        shot = await self._async_capture_to(filename, creds, tag, run)
         if shot:
             result["photo"] = shot.get("copy") or shot.get("path")
             result["snapshot"] = shot
@@ -1347,7 +1347,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         streaming = await self.companion.async_stream_status(self.did)
         await run.step("using the running stream" if streaming else "capturing directly")
 
-        shot = await self._async_capture_to(filename, creds, tag)
+        shot = await self._async_capture_to(filename, creds, tag, run)
         await self._async_end_run(
             run, owns, bool(shot),
             f"Saved to {shot.get('media_path')}" if shot else "Photo failed",
@@ -1358,7 +1358,8 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return shot
 
     async def _async_capture_to(
-        self, filename: str | None, creds: tuple, tag: str | None = None
+        self, filename: str | None, creds: tuple, tag: str | None = None,
+        run: RunReporter | None = None,
     ) -> dict | None:
         """Take a fresh photo, and optionally also copy it where asked.
 
@@ -1374,10 +1375,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # same response - there is no separate connection or credential for
         # that, since a photo can only ever be taken through this method in
         # the first place (see the module docstring in classify_registry.py).
-        registry = get_registry(self.hass)
-        if registry is not None:
-            for item in shot.get("classifications") or []:
-                await registry.async_handle_result(item)
+        await self._async_log_classifications(shot.get("classifications") or [], run)
 
         result = {
             "path": shot.get("path"),
@@ -1398,6 +1396,38 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except OSError as err:
             _LOGGER.error("Could not write the photo to %s: %s", filename, err)
         return result
+
+    async def _async_log_classifications(self, reports: list[dict], run: RunReporter | None) -> None:
+        """Narrate what the add-on made of this snapshot's linked
+        classifications, and feed anything that cleared its threshold to the
+        entity registry.
+
+        `reports` covers every classifier linked to this tag, not just the
+        ones that produced a usable result - a classifier that is disabled,
+        unconfigured, or not trained yet says so explicitly, rather than
+        looking identical to "nothing linked here at all".
+        """
+        if not reports:
+            return
+        if run is not None:
+            for item in reports:
+                if "error" in item:
+                    await run.step(f"classification: {item['error']}")
+                elif "skipped" in item:
+                    await run.step(f"classification '{item['name']}': {item['skipped']}")
+                else:
+                    verdict = "" if item["passed_threshold"] else " (below threshold)"
+                    await run.step(
+                        f"classification '{item['name']}': {item['label']} "
+                        f"({item['score'] * 100:.0f}%){verdict}"
+                    )
+
+        registry = get_registry(self.hass)
+        if registry is None:
+            return
+        for item in reports:
+            if item.get("passed_threshold"):
+                await registry.async_handle_result(item)
 
     @staticmethod
     def _write_image(filename: str, image: bytes) -> None:

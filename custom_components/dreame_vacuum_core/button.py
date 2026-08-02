@@ -50,4 +50,5 @@ class DreameSnapshotButton(DreameEntity, ButtonEntity):
             registry = get_registry(c.hass)
             if registry is not None:
                 for item in shot.get("classifications") or []:
-                    await registry.async_handle_result(item)
+                    if item.get("passed_threshold"):
+                        await registry.async_handle_result(item)

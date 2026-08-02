@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .classify_registry import ensure_registry
+from .classify_registry import ensure_registry, get_registry
 from .const import CONF_MODEL, DOMAIN
 from .coordinator import DreameCoordinator
 from .map_view import DreameMapView
@@ -119,6 +119,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         coordinator: DreameCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_shutdown_device()
+        # The platform teardown above removed the classification entities;
+        # the registry must forget them too, or a reload would keep feeding
+        # results to detached objects instead of creating fresh entities.
+        registry = get_registry(hass)
+        if registry is not None:
+            registry.reset()
     return unloaded
 
 
