@@ -94,7 +94,7 @@ def metadata(frame: dict, scale: int = 5) -> dict:
 MAP_DOCUMENT_VERSION = 1
 
 
-def map_document(frame: dict, scale: int = 5) -> dict:
+def map_document(frame: dict, scale: int = 5, room_names: dict[int, str] | None = None) -> dict:
     """The map as data, for a client that renders it itself.
 
     Sent instead of only a picture so the viewer decides what to draw: room
@@ -103,7 +103,9 @@ def map_document(frame: dict, scale: int = 5) -> dict:
     robot moves far more often than the map changes.
 
     `version` is here from the start: once a dashboard card reads this, its
-    shape is an interface.
+    shape is an interface. room_names is additive and optional - the
+    renderer already falls back to "Room <n>" when it is absent, so this
+    does not bump the version.
     """
     return {
         "version": MAP_DOCUMENT_VERSION,
@@ -112,6 +114,7 @@ def map_document(frame: dict, scale: int = 5) -> dict:
         "origin": frame["origin"],
         "cells": [frame["width"], frame["height"]],
         "rooms": sorted({v >> 2 for v in frame["grid"] if v and (v >> 2) != WALL_SEGMENT}),
+        "room_names": {str(k): v for k, v in (room_names or {}).items()},
         "grid": base64.b64encode(frame["grid"]).decode("ascii"),
         "robot": frame.get("robot"),
         "angle": frame.get("angle"),

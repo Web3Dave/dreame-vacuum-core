@@ -63,7 +63,7 @@ from .const import (
     PROPERTY_BATCH_SIZE,
     SIID_DEVICE_KEEP_ALIVE,
 )
-from .map_data import decode_frame, decode_position
+from .map_data import decode_frame, decode_position, decode_room_names
 from .map_render import map_document, metadata as map_metadata, render_png
 from .profile import DeviceProfile, load_profile
 from .transport import DreameVacuumProtocol
@@ -481,7 +481,10 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _build_document(self, raw: str, scale: int) -> dict | None:
         """Blocking: decrypt, decompress and re-encode a frame as a document."""
         frame = decode_frame(raw, self.profile.flag("AES_IV"))
-        return None if frame is None else map_document(frame, scale)
+        if frame is None:
+            return None
+        room_names = decode_room_names(frame["trailer"])
+        return map_document(frame, scale, room_names=room_names)
 
     async def async_request_map(self) -> bool:
         """Ask for a full map frame.

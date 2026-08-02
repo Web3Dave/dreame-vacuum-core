@@ -145,6 +145,66 @@ def decode_frame(raw: str, iv: str | None = None) -> dict | None:
     }
 
 
+def decode_room_names(trailer: dict) -> dict[int, str]:
+    """Segment id -> room name, from a frame's `rism` trailer field.
+
+    `rism` (present when the trailer's `ris` is 1 or 2) is a *second*,
+    separately-compressed frame with the identical header/grid/trailer shape
+    as the outer one - reverse-engineered from the phone app's own bundled
+    JS (`decodeSaveMapData` in the vacuum's React Native plugin), which
+    decodes it exactly this way: base64 (url-safe, `_`/`-` swapped back)
+    then zlib, no AES step. Its own trailer carries `seg_inf`, keyed by the
+    same segment ids the grid encodes as `value >> 2` - a room (`type: 0`)
+    has a `name`, plain base64 of the UTF-8 text; other types are
+    structural (doorways, connectors) and have none.
+
+    Verified against a real map: segment ids for "Dinner Table" and "Hall"
+    decoded to exactly those strings.
+    """
+    ris = trailer.get("ris")
+    rism = trailer.get("rism")
+    if ris not in (1, 2) or not rism:
+        return {}
+
+    try:
+        payload = rism.replace("_", "/").replace("-", "+")
+        data = zlib.decompress(base64.b64decode(payload + "=="))
+    except Exception as err:  # noqa: BLE001 - a bad rism blob is not fatal
+        _LOGGER.debug("Could not decompress rism: %s", err)
+        return {}
+
+    if len(data) < HEADER_SIZE:
+        return {}
+    width, height = _int16(data, 19), _int16(data, 21)
+    if width <= 0 or height <= 0:
+        return {}
+    expected = HEADER_SIZE + width * height
+    if len(data) < expected:
+        return {}
+
+    try:
+        inner_trailer = json.loads(data[expected:].decode("utf8")) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+    seg_inf = inner_trailer.get("seg_inf")
+    if not isinstance(seg_inf, dict):
+        return {}
+
+    names: dict[int, str] = {}
+    for area_id, item in seg_inf.items():
+        if not isinstance(item, dict) or item.get("type") != 0:
+            continue
+        name_b64 = item.get("name")
+        if not name_b64:
+            continue
+        try:
+            names[int(area_id)] = base64.b64decode(name_b64).decode("utf8")
+        except Exception:  # noqa: BLE001 - one bad name must not lose the rest
+            continue
+    return names
+
+
 def decode_position(raw: str, iv: str | None = None) -> dict | None:
     """Read the robot's pose from a raw map property value.
 
