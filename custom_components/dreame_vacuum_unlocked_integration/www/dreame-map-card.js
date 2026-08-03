@@ -204,7 +204,7 @@ class DreameMapCard extends HTMLElement {
     this._say(refresh ? "Asking the vacuum for a fresh map..." : "Loading map...");
     try {
       const api = await this._module();
-      const path = `dreame_vacuum_core/map/${did}${refresh ? "?refresh=1" : ""}`;
+      const path = `dreame_vacuum_unlocked_integration/map/${did}${refresh ? "?refresh=1" : ""}`;
       this._doc = api.decodeMap(await this._hass.callApi("GET", path));
       this._mapId = this._doc.map_id;
       this._say("");

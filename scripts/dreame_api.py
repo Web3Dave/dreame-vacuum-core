@@ -16,7 +16,7 @@ from pathlib import Path
 
 DEFAULT_LIB_PATHS = [
     # sibling checkout of the add-on repo
-    Path(__file__).resolve().parents[2] / "dreame-vacuum-companion" / "dreame_vacuum_companion",
+    Path(__file__).resolve().parents[2] / "dreame-vacuum-unlocked" / "dreame_vacuum_unlocked",
     # ...or an explicit override
 ]
 
@@ -39,7 +39,7 @@ def _load_protocol():
         "Could not locate dreame_lib.\n"
         "Checked:\n  " + "\n  ".join(str(c) for c in candidates) + "\n\n"
         "Set DREAME_LIB_PATH to the directory containing dreame_lib/, e.g.:\n"
-        "  export DREAME_LIB_PATH=../dreame-vacuum-companion/dreame_vacuum_companion"
+        "  export DREAME_LIB_PATH=../dreame-vacuum-unlocked/dreame_vacuum_unlocked"
     )
 
 

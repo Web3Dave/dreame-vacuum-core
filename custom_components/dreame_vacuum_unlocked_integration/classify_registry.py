@@ -45,7 +45,7 @@ def _device_info(classifier_id: str, name: str) -> dict:
         "identifiers": {(DOMAIN, f"classify_{classifier_id}")},
         "name": name,
         "model": "Snapshot classification",
-        "manufacturer": "Dreame Vacuum Companion",
+        "manufacturer": "Dreame Vacuum Unlocked",
     }
 
 

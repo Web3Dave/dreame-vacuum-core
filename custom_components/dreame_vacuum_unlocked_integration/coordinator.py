@@ -1675,7 +1675,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.warning(
                 "No camera PIN configured for %s - rotating without a camera session, "
                 "so the brushes will run. Set the PIN in the integration's options "
-                "(Settings > Devices & Services > Dreame Vacuum Core > Configure)",
+                "(Settings > Devices & Services > Dreame Vacuum Unlocked Integration > Configure)",
                 self.device_name,
             )
             return None

@@ -1,8 +1,8 @@
-"""Constants for Dreame Vacuum Core."""
+"""Constants for Dreame Vacuum Unlocked Integration."""
 
 from __future__ import annotations
 
-DOMAIN = "dreame_vacuum_core"
+DOMAIN = "dreame_vacuum_unlocked_integration"
 
 # --- config entry keys ---------------------------------------------------
 CONF_USERNAME = "username"

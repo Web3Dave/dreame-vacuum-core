@@ -19,14 +19,14 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-MAPS_API_PATH = "/api/dreame_vacuum_core/maps/{did}"
+MAPS_API_PATH = "/api/dreame_vacuum_unlocked_integration/maps/{did}"
 
 
 class DreameMapsView(HomeAssistantView):
-    """GET /api/dreame_vacuum_core/maps/<did>"""
+    """GET /api/dreame_vacuum_unlocked_integration/maps/<did>"""
 
     url = MAPS_API_PATH
-    name = "api:dreame_vacuum_core:maps"
+    name = "api:dreame_vacuum_unlocked_integration:maps"
     requires_auth = True
 
     def __init__(self, hass: HomeAssistant) -> None:

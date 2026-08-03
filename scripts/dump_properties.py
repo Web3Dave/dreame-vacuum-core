@@ -37,7 +37,7 @@ from dreame_api import _load_protocol  # noqa: E402
 # dict of siids and piids.
 SERVICES_JSON = (
     Path(__file__).resolve().parents[1]
-    / "custom_components" / "dreame_vacuum_core" / "profiles" / "_services.json"
+    / "custom_components" / "dreame_vacuum_unlocked_integration" / "profiles" / "_services.json"
 )
 
 BATCH = 15

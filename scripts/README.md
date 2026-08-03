@@ -29,7 +29,7 @@ export DREAME_PASSWORD='...'
 export DREAME_COUNTRY='eu'
 
 # 2. auth code lives in the companion add-on repo - point at it
-export DREAME_LIB_PATH=../dreame-vacuum-companion/dreame_vacuum_companion
+export DREAME_LIB_PATH=../dreame-vacuum-unlocked/dreame_vacuum_unlocked
 
 # 3. download bundles into ./plugins/ (untracked)
 python3 scripts/fetch_plugins.py --models-file scripts/models.txt --from-account
@@ -70,7 +70,7 @@ model resource package is byte-identical for both.
 ## Output
 
 ```
-custom_components/dreame_vacuum_core/profiles/
+custom_components/dreame_vacuum_unlocked_integration/profiles/
   _services.json              siid -> service, aiid names, piid maps
   dreame.vacuum.r2579h.json   125 capability flags + provenance
   dreame.vacuum.r2338a.json    97 capability flags + provenance
@@ -135,7 +135,7 @@ python scripts/rotate_experiment.py --did <device id>
 Needs the companion package on PYTHONPATH for the camera calls:
 
 ```
-PYTHONPATH=../dreame-vacuum-companion/dreame_vacuum_companion python scripts/...
+PYTHONPATH=../dreame-vacuum-unlocked/dreame_vacuum_unlocked python scripts/...
 ```
 
 Reads credentials from `.env` in the repo root (DREAME_USERNAME,

@@ -1,4 +1,4 @@
-# dreame_vacuum_core
+# dreame_vacuum_unlocked_integration
 
 Layered rewrite of the Dreame vacuum integration, built around generated
 device profiles instead of hand-maintained mapping tables.
@@ -8,7 +8,7 @@ transport/     vendored: login, request signing, MQTT  (sync; executor only)
 profiles/      generated JSON - service vocabulary + per-model capabilities
 profile.py     loads the above; keeps vocabulary/flags/presence separate
 coordinator.py push-first state, adaptive polling, device keep-alive
-companion.py   client for the dreame_vacuum_companion add-on (camera)
+companion.py   client for the dreame_vacuum_unlocked add-on (camera)
 *.py           thin HA entity platforms
 ```
 
@@ -30,7 +30,7 @@ with a fluffing-roller sensor on a vacuum that has none.
 
 ```bash
 export DREAME_USERNAME=... DREAME_PASSWORD=... DREAME_COUNTRY=eu
-export DREAME_LIB_PATH=../dreame-vacuum-companion/dreame_vacuum_companion
+export DREAME_LIB_PATH=../dreame-vacuum-unlocked/dreame_vacuum_unlocked
 python3 scripts/fetch_plugins.py --models-file scripts/models.txt --from-account
 python3 scripts/extract_profiles.py
 ```
@@ -40,7 +40,7 @@ servers. See `scripts/README.md`.
 
 ## Camera
 
-Camera/streaming lives in the `dreame_vacuum_companion` add-on because
+Camera/streaming lives in the `dreame_vacuum_unlocked` add-on because
 Tencent's XP2P libraries are x86_64-only. Keeping it out of process is what
 lets this integration stay pure Python and run on ARM (Pi, HA Green/Yellow).
 Camera setup is an optional, skippable step in the config flow.

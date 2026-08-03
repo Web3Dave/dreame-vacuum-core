@@ -23,7 +23,7 @@ from homeassistant.components.http import HomeAssistantView
 
 _LOGGER = logging.getLogger(__name__)
 
-SNAPSHOT_API_PATH = "/api/dreame_vacuum_core/snapshot/{tag}/{filename}"
+SNAPSHOT_API_PATH = "/api/dreame_vacuum_unlocked_integration/snapshot/{tag}/{filename}"
 
 SNAPSHOT_ROOT = "/media/dreame-capture/snapshots"
 
@@ -41,10 +41,10 @@ def _safe_component(value: str) -> str:
 
 
 class DreameSnapshotView(HomeAssistantView):
-    """GET /api/dreame_vacuum_core/snapshot/<tag>/<filename>"""
+    """GET /api/dreame_vacuum_unlocked_integration/snapshot/<tag>/<filename>"""
 
     url = SNAPSHOT_API_PATH
-    name = "api:dreame_vacuum_core:snapshot"
+    name = "api:dreame_vacuum_unlocked_integration:snapshot"
     requires_auth = True
 
     async def get(self, request: web.Request, tag: str, filename: str) -> web.Response:

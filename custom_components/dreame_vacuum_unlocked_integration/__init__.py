@@ -1,4 +1,4 @@
-"""The Dreame Vacuum Core integration."""
+"""The Dreame Vacuum Unlocked Integration."""
 from __future__ import annotations
 
 import logging
@@ -33,7 +33,7 @@ PLATFORMS: list[Platform] = [
 # Served to whoever draws a map - the add-on's panel today, a Lovelace card
 # next. One copy so the coordinate transform cannot drift between them, which
 # is exactly how a click once landed mirrored about the middle of the map.
-MAP_STATIC_URL = "/dreame_vacuum_core"
+MAP_STATIC_URL = "/dreame_vacuum_unlocked_integration"
 MAP_MODULE_URL = f"{MAP_STATIC_URL}/map.js"
 MAP_CARD_URL = f"{MAP_STATIC_URL}/dreame-map-card.js"
 

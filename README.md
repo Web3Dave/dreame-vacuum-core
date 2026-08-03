@@ -1,4 +1,4 @@
-# Dreame Vacuum Core
+# Dreame Vacuum Unlocked Integration
 
 Control your Dreame robot vacuum from Home Assistant — cleaning controls,
 battery and status, and optionally a live camera feed.
@@ -29,7 +29,7 @@ battery and status, and optionally a live camera feed.
 ### About the camera
 
 Camera support needs the separate
-[Dreame Vacuum Companion](https://github.com/Web3Dave/dreame-vacuum-companion)
+[Dreame Vacuum Unlocked](https://github.com/Web3Dave/dreame-vacuum-unlocked)
 add-on, and that add-on **only runs on x86_64 hardware** — an Intel/AMD mini-PC,
 NUC or VM. It will not run on a Raspberry Pi, Home Assistant Green or Yellow,
 because the video libraries it depends on aren't published for those.
@@ -43,16 +43,16 @@ Assistant install. The camera step is optional and can be skipped.
 
 1. HACS → ⋮ → **Custom repositories**
 2. Add `https://github.com/Web3Dave/dreame-vacuum-core` as an **Integration**
-3. Install **Dreame Vacuum Core**, then restart Home Assistant
+3. Install **Dreame Vacuum Unlocked Integration**, then restart Home Assistant
 
 **Manually**
 
-Copy `custom_components/dreame_vacuum_core/` into your Home Assistant
+Copy `custom_components/dreame_vacuum_unlocked_integration/` into your Home Assistant
 `config/custom_components/` folder and restart.
 
 ## Set up
 
-1. **Settings → Devices & Services → Add Integration → Dreame Vacuum Core**
+1. **Settings → Devices & Services → Add Integration → Dreame Vacuum Unlocked Integration**
 2. Enter your Dreame username, password and region (most European accounts are
    `eu` — check **Settings → Region** in the app if unsure)
 3. Choose your vacuum
@@ -91,6 +91,6 @@ and its API token matches, and check the add-on's log.
 
 ---
 
-Contributing? See [`custom_components/dreame_vacuum_core/README.md`](custom_components/dreame_vacuum_core/README.md)
+Contributing? See [`custom_components/dreame_vacuum_unlocked_integration/README.md`](custom_components/dreame_vacuum_unlocked_integration/README.md)
 for the architecture and [`scripts/README.md`](scripts/README.md) for how device
 profiles are generated.

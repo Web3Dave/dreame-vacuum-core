@@ -19,7 +19,7 @@
       },
       "camera": {
         "title": "Camera (optional)",
-        "description": "Camera streaming is handled by the Dreame Vacuum Companion add-on, which is x86_64-only. Leave the token blank to skip - the vacuum works without it.\n\nModel: {model} (capability profile shipped: {profile}; {known_models} model(s) known)",
+        "description": "Camera streaming is handled by the Dreame Vacuum Unlocked add-on, which is x86_64-only. Leave the token blank to skip - the vacuum works without it.\n\nModel: {model} (capability profile shipped: {profile}; {known_models} model(s) known)",
         "data": {
           "companion_host": "Companion host",
           "companion_port": "Companion port",
@@ -43,7 +43,7 @@
     "step": {
       "init": {
         "title": "Companion add-on",
-        "description": "Update the connection to the Dreame Vacuum Companion add-on. Clear the token to turn the camera off.",
+        "description": "Update the connection to the Dreame Vacuum Unlocked add-on. Clear the token to turn the camera off.",
         "data": {
           "companion_host": "Companion host",
           "companion_port": "Companion port",

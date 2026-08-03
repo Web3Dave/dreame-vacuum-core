@@ -6,7 +6,7 @@ rotate_to_heading:
     so this measures, corrects and repeats until it is within tolerance.
   target:
     entity:
-      integration: dreame_vacuum_core
+      integration: dreame_vacuum_unlocked_integration
       domain: vacuum
   fields:
     heading:
@@ -98,7 +98,7 @@ go_to_point:
     and are only valid for the map they were read from - check map_id.
   target:
     entity:
-      integration: dreame_vacuum_core
+      integration: dreame_vacuum_unlocked_integration
       domain: vacuum
   fields:
     x:
@@ -176,7 +176,7 @@ remote_control:
     and velocity is forward speed in mm/s - neither is a distance.
   target:
     entity:
-      integration: dreame_vacuum_core
+      integration: dreame_vacuum_unlocked_integration
       domain: vacuum
   fields:
     rotation:
@@ -230,7 +230,7 @@ inspect_point:
     Returns what happened, so a script can report a partial success.
   target:
     entity:
-      integration: dreame_vacuum_core
+      integration: dreame_vacuum_unlocked_integration
       domain: vacuum
   fields:
     x:
@@ -316,7 +316,7 @@ take_snapshot:
     competes with anything else holding one.
   target:
     entity:
-      integration: dreame_vacuum_core
+      integration: dreame_vacuum_unlocked_integration
       domain: vacuum
   fields:
     tag:
@@ -344,7 +344,7 @@ start_task:
     in the add-on's Tasks tab; this is how an automation triggers one.
   target:
     entity:
-      integration: dreame_vacuum_core
+      integration: dreame_vacuum_unlocked_integration
       domain: vacuum
   fields:
     task:
@@ -365,7 +365,7 @@ publish_map:
     picker; you should not normally need to run it yourself.
   target:
     entity:
-      integration: dreame_vacuum_core
+      integration: dreame_vacuum_unlocked_integration
       domain: vacuum
   fields:
     scale:

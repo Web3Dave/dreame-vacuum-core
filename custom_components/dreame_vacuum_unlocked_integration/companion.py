@@ -1,4 +1,4 @@
-"""Client for the dreame_vacuum_companion add-on.
+"""Client for the dreame_vacuum_unlocked add-on.
 
 The add-on owns everything camera/streaming, because Tencent's XP2P libraries
 are x86_64-only. Keeping that out of process is what allows this integration
