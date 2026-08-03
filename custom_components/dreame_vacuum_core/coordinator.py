@@ -486,6 +486,73 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         room_names = decode_room_names(frame["trailer"])
         return map_document(frame, scale, room_names=room_names)
 
+    async def async_list_maps(self) -> dict:
+        """Every map the cloud has a backup history for, and which one (if
+        any) is currently active.
+
+        Listing only - this reads PropBackupMapInfo, the same manifest the
+        phone app's own "recover map" feature is built on, but does not
+        download or restore anything. Each backup's own map data turned out
+        to be a bzip2-compressed tar archive, a format the app itself does
+        not appear to parse client-side either (found no trace of it in the
+        app's bundled JS or its native library's symbol table) - so this
+        deliberately stops at metadata (timestamps, which map they belong
+        to) rather than guessing at an undocumented archive layout.
+        """
+        return await self.hass.async_add_executor_job(self._list_maps_blocking)
+
+    def _list_maps_blocking(self) -> dict:
+        current_map_id: int | None = None
+        if self._last_frame:
+            frame = decode_frame(self._last_frame, self.profile.flag("AES_IV"))
+            if frame:
+                try:
+                    current_map_id = int(frame["trailer"].get("curid"))
+                except (TypeError, ValueError):
+                    current_map_id = None
+
+        ids = self.profile.prop_id("CleanMap", "PropBackupMapInfo")
+        if ids is None or self._protocol is None:
+            return {"current_map_id": current_map_id, "maps": []}
+
+        try:
+            result = self._protocol.cloud.get_properties(f"{ids[0]}.{ids[1]}")
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Backup map manifest read failed: %s", err)
+            return {"current_map_id": current_map_id, "maps": []}
+
+        if not (isinstance(result, list) and result and result[0].get("value")):
+            return {"current_map_id": current_map_id, "maps": []}
+
+        try:
+            manifest = json.loads(result[0]["value"])
+        except (TypeError, ValueError) as err:
+            _LOGGER.debug("Backup map manifest was not valid JSON: %s", err)
+            return {"current_map_id": current_map_id, "maps": []}
+
+        maps = []
+        for entry in manifest if isinstance(manifest, list) else []:
+            try:
+                map_id = int(entry["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            backups = []
+            for info in entry.get("info") or []:
+                if not isinstance(info, dict) or "time" not in info:
+                    continue
+                backups.append({
+                    "time": info["time"],
+                    "first": bool(info.get("first")),
+                })
+            backups.sort(key=lambda b: b["time"], reverse=True)
+            maps.append({
+                "id": map_id,
+                "is_current": map_id == current_map_id,
+                "backups": backups,
+            })
+        maps.sort(key=lambda m: (not m["is_current"], -(m["backups"][0]["time"] if m["backups"] else 0)))
+        return {"current_map_id": current_map_id, "maps": maps}
+
     async def async_request_map(self) -> bool:
         """Ask for a full map frame.
 
