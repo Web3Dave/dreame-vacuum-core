@@ -102,7 +102,11 @@ export function describePoint(map, x, y) {
 }
 
 export function roomColour(room) {
-  return ROOM_COLOURS[(room - 1) % ROOM_COLOURS.length];
+  // JS % keeps the dividend's sign, so (0 - 1) % N is -1 and index -1 is
+  // undefined. Backup maps can carry an "outside" room 0, so wrap to a real
+  // colour instead of handing undefined to shade().
+  const n = ((room - 1) % ROOM_COLOURS.length + ROOM_COLOURS.length) % ROOM_COLOURS.length;
+  return ROOM_COLOURS[n];
 }
 
 /** Rooms and walls. Everything else draws on top of this. */
@@ -509,6 +513,7 @@ function drawLabel(ctx, text, x, y, scale) {
 }
 
 function shade(hex, factor) {
+  if (typeof hex !== "string" || !/^#[0-9a-f]{6}$/i.test(hex)) return hex || "#000";
   const n = parseInt(hex.slice(1), 16);
   const r = Math.round(((n >> 16) & 255) * factor);
   const g = Math.round(((n >> 8) & 255) * factor);
