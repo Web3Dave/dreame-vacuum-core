@@ -24,6 +24,8 @@ import time
 import uuid
 from typing import Any
 
+import requests
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import (
@@ -490,14 +492,17 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Every map the cloud has a backup history for, and which one (if
         any) is currently active.
 
-        Listing only - this reads PropBackupMapInfo, the same manifest the
-        phone app's own "recover map" feature is built on, but does not
-        download or restore anything. Each backup's own map data turned out
-        to be a bzip2-compressed tar archive, a format the app itself does
-        not appear to parse client-side either (found no trace of it in the
-        app's bundled JS or its native library's symbol table) - so this
-        deliberately stops at metadata (timestamps, which map they belong
-        to) rather than guessing at an undocumented archive layout.
+        Listing only - this mirrors the phone app's own "recover map" flow and
+        does not download or restore anything. PropBackupMapInfo points at the
+        most recent backup-manifest *file* on Dreame's cloud storage (its value
+        is the object's name, on some firmwares wrapped as ``{"object_name": ...}``);
+        the manifest is that file, fetched through the file-bridge
+        (``getDownloadUrl``) and parsed for the per-map backup timestamps.
+
+        Each backup's own map payload is an opaque blob (the file carries a
+        compressed thumbnail and the map archive is not parsed here) - so this
+        deliberately stops at metadata rather than guessing at an undocumented
+        archive layout.
         """
         return await self.hass.async_add_executor_job(self._list_maps_blocking)
 
@@ -524,10 +529,39 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not (isinstance(result, list) and result and result[0].get("value")):
             return {"current_map_id": current_map_id, "maps": []}
 
+        # PropBackupMapInfo does not carry the manifest inline. Its value is
+        # the cloud object *name* of the newest backup-manifest file - on a
+        # bare-object-name firmware the value is the path directly, on the MIoT
+        # route it arrives wrapped as {"object_name": "..."}. Either way the
+        # manifest body is that file, downloaded through the file-bridge
+        # (the same getDownloadUrl the phone app's recovery screen calls).
+        value = result[0]["value"]
+        object_name = value if isinstance(value, str) else ""
         try:
-            manifest = json.loads(result[0]["value"])
-        except (TypeError, ValueError) as err:
-            _LOGGER.debug("Backup map manifest was not valid JSON: %s", err)
+            parsed = json.loads(object_name)
+            if isinstance(parsed, dict) and isinstance(parsed.get("object_name"), str):
+                object_name = parsed["object_name"]
+        except (TypeError, ValueError):
+            pass
+
+        if not object_name:
+            return {"current_map_id": current_map_id, "maps": []}
+
+        try:
+            url = self._protocol.cloud.get_interim_file_url(object_name)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Backup map manifest URL fetch failed: %s", err)
+            return {"current_map_id": current_map_id, "maps": []}
+
+        if not isinstance(url, str) or not url:
+            return {"current_map_id": current_map_id, "maps": []}
+
+        try:
+            resp = requests.get(url, timeout=25)
+            resp.raise_for_status()
+            manifest = resp.json()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Backup map manifest download failed: %s", err)
             return {"current_map_id": current_map_id, "maps": []}
 
         maps = []
