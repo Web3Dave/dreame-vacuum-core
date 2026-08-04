@@ -527,6 +527,111 @@ function drawLabel(ctx, text, x, y, scale) {
   ctx.restore();
 }
 
+/**
+ * Room id at a canvas pixel, or null for a wall / outside the map.
+ *
+ * The Room tab makes rooms tappable on the map itself, so a tap needs to know
+ * which room it landed on. `pixelToWorld` inverts the drawing transform, then
+ * `describePoint` resolves the world point to a room through the grid - the
+ * same path the point picker uses, so a click can never disagree with what a
+ * tap meant to hit.
+ */
+export function roomAtPixel(map, px, py, scale = 1) {
+  const w = pixelToWorld(map, px, py, scale);
+  const info = describePoint(map, w.x, w.y);
+  return info.ok ? info.room : null;
+}
+
+/**
+ * Per-room bounding boxes, in world cells. Shared by the picker's labels and
+ * the Room tab's selection badges so both place markers at the same spot.
+ */
+function roomBoxes(map) {
+  const box = new Map();
+  const { cols, rows, grid } = map;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const value = grid[row * cols + col];
+      const room = value >> 2;
+      if (!value || room === WALL) continue;
+      const b = box.get(room) || { minCol: cols, minRow: rows, maxCol: -1, maxRow: -1 };
+      if (col < b.minCol) b.minCol = col;
+      if (col > b.maxCol) b.maxCol = col;
+      if (row < b.minRow) b.minRow = row;
+      if (row > b.maxRow) b.maxRow = row;
+      box.set(room, b);
+    }
+  }
+  return box;
+}
+
+/**
+ * The map with rooms selectable, for the Room tab.
+ *
+ * Unselected rooms are drawn semi-transparent so they recede; selected rooms
+ * stay full colour and get a numbered bubble next to their name showing the
+ * order in which they were picked (matching the phone app, where the number is
+ * the cleaning order). `selectedOrder` is an array of room ids in pick order.
+ */
+export function drawRoomSelection(ctx, map, { scale = 1, selectedOrder = [] } = {}) {
+  const selected = new Set(selectedOrder.map(String));
+  const { cols, rows, grid } = map;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  const box = roomBoxes(map);
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const value = grid[row * cols + col];
+      if (!value) continue;
+      const room = value >> 2;
+      let colour;
+      if (room === WALL) {
+        colour = WALL_COLOUR;
+      } else {
+        colour = roomColour(room);
+        if ((value & 3) === AREA_KIND) colour = shade(colour, 0.78);
+        if (!selected.has(String(room))) ctx.globalAlpha = 0.35;
+      }
+      ctx.fillStyle = colour;
+      ctx.fillRect(col * scale, (rows - 1 - row) * scale, scale, scale);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Room names on every room, then a number bubble beside selected rooms.
+  drawRoomNames(ctx, map, scale);
+  for (const [room, b] of box) {
+    const order = selectedOrder.indexOf(String(room));
+    if (order < 0) continue;
+    const cx = (b.minCol + b.maxCol) / 2 + 0.5;
+    const cy = (b.minRow + b.maxRow) / 2 + 0.5;
+    const x = cx * scale;
+    const y = (rows - 1 - cy) * scale;
+    drawOrderBubble(ctx, order + 1, x + Math.max(10, scale * 2.6), y, scale);
+  }
+  ctx.restore();
+}
+
+/** The numbered circle the app shows next to a selected room. */
+function drawOrderBubble(ctx, number, x, y, scale) {
+  const r = Math.max(11, scale * 2.4);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#03a9f4";
+  ctx.fill();
+  ctx.lineWidth = Math.max(2, scale * 0.5);
+  ctx.strokeStyle = "#fff";
+  ctx.stroke();
+  ctx.font = `bold ${Math.max(12, scale * 2.6)}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#fff";
+  ctx.fillText(String(number), x, y + 1);
+  ctx.restore();
+}
+
 function shade(hex, factor) {
   if (typeof hex !== "string" || !/^#[0-9a-f]{6}$/i.test(hex)) return hex || "#000";
   const n = parseInt(hex.slice(1), 16);

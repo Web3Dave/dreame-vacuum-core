@@ -76,6 +76,12 @@ _LOGGER = logging.getLogger(__name__)
 # as "start a cleaning task of this kind", not as a movement command.
 CRUISE_POINT_MODE = 23
 
+# "Clean a chosen set of rooms" work mode. The app starts it through the same
+# VacuumExtend.startClean action as every other kind of cleaning; what makes
+# it room-specific is the payload in PropCleanExtendData listing the room ids
+# in the order they should be cleaned.
+AREA_CLEAN_MODE = 18
+
 # The values the app's live view sends: 45 / -45 to turn, 180 to spin round,
 # 200 forward. It holds them while the button is down. This integration sends
 # an angle instead - see async_turn_degrees for why.
@@ -2007,6 +2013,52 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_change = time.time()
             await self.async_request_refresh()
         return ok
+
+    async def async_clean_rooms(self, room_ids: list[int], times: int = 1) -> bool:
+        """Clean a chosen set of rooms, in the order their ids are given.
+
+        Mirrors the phone app's room-cleaning command. The app sends
+        `VacuumExtend.startClean(WorkMode.AreaClean, payload)` where the payload
+        lists each room as `[roomId, times, cleaningMode, mopMode, 1]` and the
+        array order *is* the cleaning order - the vacuum visits the rooms in the
+        order they appear. We build the same payload over the same action,
+        carrying the mode + payload via PropCleanExtendData exactly as
+        `go_to_point` does for its own work mode.
+
+        `times` is how many times to clean each room (the app's selectNum).
+        """
+        if not room_ids:
+            return False
+        mode_ids = self.profile.prop_id("VacuumExtend", "PropWorkMode")
+        extend_ids = self.profile.prop_id("VacuumExtend", "PropCleanExtendData")
+        if mode_ids is None or extend_ids is None:
+            _LOGGER.warning(
+                "%s has no room-clean vocab (PropWorkMode/PropCleanExtendData)",
+                self.model,
+            )
+            return False
+
+        # Room cleaning is expressed as "startClean with this work mode + a
+        # payload naming the rooms". Reuse the current cleaning/mop modes as the
+        # app does (each entry carries them), defaulting to sweep when unknown.
+        cleaning_mode = self.value("VacuumExtend", "PropCleaningMode")
+        mop_mode = self.value("VacuumExtend", "PropMopMode")
+        cleaning_mode = cleaning_mode if isinstance(cleaning_mode, int) else 0
+        mop_mode = mop_mode if isinstance(mop_mode, int) else 0
+
+        selects = [
+            [int(rid), int(times), int(cleaning_mode), int(mop_mode), 1]
+            for rid in room_ids
+        ]
+        params = json.dumps({"selects": selects}, separators=(",", ":"))
+        return await self.async_action(
+            "VacuumExtend",
+            "startClean",
+            [
+                {"piid": mode_ids[1], "value": AREA_CLEAN_MODE},
+                {"piid": extend_ids[1], "value": params},
+            ],
+        )
 
     # -- companion --------------------------------------------------------
     async def async_register_with_companion(self) -> None:

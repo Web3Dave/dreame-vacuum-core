@@ -357,6 +357,34 @@ start_task:
       selector:
         text:
 
+clean_rooms:
+  name: Clean rooms
+  description: >-
+    Clean a chosen set of rooms in the order their ids are listed. Mirrors the
+    phone app's room-cleaning mode: the vacuum visits each room in the order
+    given, so the list order is the cleaning order.
+  target:
+    entity:
+      integration: dreame_vacuum_unlocked_integration
+      domain: vacuum
+  fields:
+    rooms:
+      name: Rooms
+      description: >-
+        Room (segment) ids to clean, in the order they should be cleaned.
+        The same ids the live map reports under room_names.
+      required: true
+      selector:
+        object:
+    times:
+      name: Times
+      description: How many times to clean each room.
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 5
+
 publish_map:
   name: Publish the map
   description: >-

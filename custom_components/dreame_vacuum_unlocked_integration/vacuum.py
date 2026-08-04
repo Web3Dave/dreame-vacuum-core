@@ -195,9 +195,12 @@ ATTR_STOP_STREAM = "stop_stream"
 SERVICE_TAKE_SNAPSHOT = "take_snapshot"
 SERVICE_START_TASK = "start_task"
 SERVICE_PUBLISH_MAP = "publish_map"
+SERVICE_CLEAN_ROOMS = "clean_rooms"
 ATTR_SCALE = "scale"
 ATTR_TASK = "task"
 ATTR_TAG = "tag"
+ATTR_ROOMS = "rooms"
+ATTR_TIMES = "times"
 
 
 def _device_state_name(value) -> str | None:
@@ -254,6 +257,19 @@ async def async_setup_entry(
         SERVICE_START_TASK,
         {vol.Required(ATTR_TASK): cv.string},
         "async_start_task",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        SERVICE_CLEAN_ROOMS,
+        {
+            vol.Required(ATTR_ROOMS): vol.All(
+                cv.ensure_list, [vol.All(vol.Coerce(int), vol.Range(min=0))]
+            ),
+            vol.Optional(ATTR_TIMES, default=1): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=5)
+            ),
+        },
+        "async_clean_rooms",
         supports_response=SupportsResponse.OPTIONAL,
     )
     platform.async_register_entity_service(
@@ -520,6 +536,9 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
 
     async def async_start_task(self, task: str) -> dict:
         return await self.coordinator.async_start_task(task)
+
+    async def async_clean_rooms(self, rooms: list, times: int = 1) -> bool:
+        return await self.coordinator.async_clean_rooms(rooms, times)
 
     async def async_publish_map(self, scale: int = 5) -> dict:
         return await self.coordinator.async_publish_map(scale)
