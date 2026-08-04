@@ -40,6 +40,29 @@ HEADER_SIZE = 27
 # degrees.
 ANGLE_UNKNOWN = 32767
 
+# Room-type code -> standard English name, mirrored from the phone app's
+# `areaTypesLDS` table. A seg_inf entry with `type != 0` is a room the
+# firmware auto-classified; the app displays these standard names (while
+# `type == 0` rooms carry a user-renamed base64 `name` instead). Unknown /
+# non-room types are omitted so the renderer falls back to "Room N".
+AREA_TYPE_NAMES: dict[int, str] = {
+    1: "Living Room",
+    2: "Bedroom",
+    3: "Study",
+    4: "Kitchen",
+    5: "Dining Room",
+    6: "Bathroom",
+    7: "Balcony",
+    8: "Hallway",
+    9: "Storage Room",
+    10: "Closet",
+    11: "Drawing Room",
+    12: "Office",
+    13: "Fitness Area",
+    14: "Leisure Area",
+    15: "Bedroom 2",
+}
+
 
 def _int16(data: bytes, offset: int) -> int:
     return int.from_bytes(data[offset : offset + 2], byteorder="little", signed=True)
@@ -149,22 +172,40 @@ def _room_names_from_seg_inf(seg_inf) -> dict[int, str]:
     """Segment id -> name from a `seg_inf` dict.
 
     `seg_inf` is keyed by the same segment ids the grid encodes as
-    `value >> 2`; a room (`type: 0`) carries a `name`, plain base64 of the
-    UTF-8 text, while structural entries (doorways, connectors) have none.
+    `value >> 2`. Two kinds of room:
+
+    * `type: 0` is a user-named (custom) room - its `name` is plain base64 of
+      the UTF-8 text.
+    * `type != 0` is a room the firmware classified - the phone app maps that
+      type code to a standard name via its `areaTypesLDS` table (kitchen,
+      bathroom, wardrobe, ...). We mirror those English labels so typed rooms
+      get a real name instead of the renderer's "Room N" fallback.
+
+    Structural entries (doorways, connectors) are not rooms and are skipped.
     """
     if not isinstance(seg_inf, dict):
         return {}
     names: dict[int, str] = {}
     for area_id, item in seg_inf.items():
-        if not isinstance(item, dict) or item.get("type") != 0:
+        if not isinstance(item, dict):
             continue
-        name_b64 = item.get("name")
-        if not name_b64:
+        rtype = item.get("type")
+        if rtype is None:
+            # No type field at all - not a nameable room, skip.
             continue
-        try:
-            names[int(area_id)] = base64.b64decode(name_b64).decode("utf8")
-        except Exception:  # noqa: BLE001 - one bad name must not lose the rest
-            continue
+        if rtype == 0:
+            name_b64 = item.get("name")
+            if not name_b64:
+                continue
+            try:
+                name = base64.b64decode(name_b64).decode("utf8")
+            except Exception:  # noqa: BLE001 - one bad name must not lose the rest
+                continue
+        else:
+            name = AREA_TYPE_NAMES.get(int(rtype))
+            if not name:
+                continue  # unknown/infra type - let the renderer fall back
+        names[int(area_id)] = name
     return names
 
 
