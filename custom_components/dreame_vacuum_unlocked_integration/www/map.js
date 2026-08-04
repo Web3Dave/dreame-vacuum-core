@@ -135,32 +135,47 @@ export function drawBase(ctx, map, { scale = 1, showRoomNames = false } = {}) {
   ctx.restore();
 }
 
-/** Room labels at each room's centre of mass. */
+/** Room labels, positioned at each room's bounding-box centre.
+ *
+ * Mirrors the phone app: its map decoder computes each area's
+ * `minX/minY/maxX/maxY` (its axis-aligned bounding box in map cells) and
+ * places the label at `(maxX-minX)/2+minX, (maxY-minY)/2+minY` - the box
+ * centre, not the cells' centre of mass. An L or U-shaped room's centroid
+ * can sit on a wall or outside the room, so the box centre reads far better.
+ */
 function drawRoomNames(ctx, map, scale) {
-  const sums = new Map();
+  const box = new Map(); // room -> {minCol,minRow,maxCol,maxRow}
   const { cols, rows, grid } = map;
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const value = grid[row * cols + col];
       const room = value >> 2;
       if (!value || room === WALL) continue;
-      const acc = sums.get(room) || { x: 0, y: 0, n: 0 };
-      acc.x += col; acc.y += row; acc.n += 1;
-      sums.set(room, acc);
+      const b = box.get(room) || { minCol: cols, minRow: rows, maxCol: -1, maxRow: -1 };
+      if (col < b.minCol) b.minCol = col;
+      if (col > b.maxCol) b.maxCol = col;
+      if (row < b.minRow) b.minRow = row;
+      if (row > b.maxRow) b.maxRow = row;
+      box.set(room, b);
     }
   }
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
   ctx.font = `${Math.max(11, scale * 2.4)}px system-ui, sans-serif`;
-  for (const [room, acc] of sums) {
+  for (const [room, b] of box) {
     const label = (map.room_names || {})[room] || `Room ${room}`;
-    const x = (acc.x / acc.n) * scale;
-    const y = (rows - 1 - acc.y / acc.n) * scale;
+    const cx = (b.minCol + b.maxCol) / 2 + 0.5;
+    const cy = (b.minRow + b.maxRow) / 2 + 0.5;
+    // Flip the row the same way the grid is drawn (see drawBase).
+    const x = cx * scale;
+    const y = (rows - 1 - cy) * scale;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
     ctx.lineWidth = 3;
     ctx.strokeStyle = "rgba(0,0,0,.55)";
     ctx.strokeText(label, x, y);
     ctx.fillStyle = "#fff";
     ctx.fillText(label, x, y);
+    ctx.restore();
   }
 }
 
