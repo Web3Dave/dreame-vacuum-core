@@ -520,52 +520,12 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if ids is None or self._protocol is None:
             return {"current_map_id": current_map_id, "maps": []}
 
-        try:
-            result = self._protocol.cloud.get_properties(f"{ids[0]}.{ids[1]}")
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Backup map manifest read failed: %s", err)
-            return {"current_map_id": current_map_id, "maps": []}
-
-        if not (isinstance(result, list) and result and result[0].get("value")):
-            return {"current_map_id": current_map_id, "maps": []}
-
-        # PropBackupMapInfo does not carry the manifest inline. Its value is
-        # the cloud object *name* of the newest backup-manifest file - on a
-        # bare-object-name firmware the value is the path directly, on the MIoT
-        # route it arrives wrapped as {"object_name": "..."}. Either way the
-        # manifest body is that file, downloaded through the file-bridge
-        # (the same getDownloadUrl the phone app's recovery screen calls).
-        value = result[0]["value"]
-        object_name = value if isinstance(value, str) else ""
-        try:
-            parsed = json.loads(object_name)
-            if isinstance(parsed, dict) and isinstance(parsed.get("object_name"), str):
-                object_name = parsed["object_name"]
-        except (TypeError, ValueError):
-            pass
-
-        if not object_name:
-            return {"current_map_id": current_map_id, "maps": []}
-
-        try:
-            url = self._protocol.cloud.get_interim_file_url(object_name)
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Backup map manifest URL fetch failed: %s", err)
-            return {"current_map_id": current_map_id, "maps": []}
-
-        if not isinstance(url, str) or not url:
-            return {"current_map_id": current_map_id, "maps": []}
-
-        try:
-            resp = requests.get(url, timeout=25)
-            resp.raise_for_status()
-            manifest = resp.json()
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Backup map manifest download failed: %s", err)
+        manifest = self._fetch_backup_manifest()
+        if not manifest:
             return {"current_map_id": current_map_id, "maps": []}
 
         maps = []
-        for entry in manifest if isinstance(manifest, list) else []:
+        for entry in manifest:
             try:
                 map_id = int(entry["id"])
             except (KeyError, TypeError, ValueError):
@@ -586,6 +546,100 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             })
         maps.sort(key=lambda m: (not m["is_current"], -(m["backups"][0]["time"] if m["backups"] else 0)))
         return {"current_map_id": current_map_id, "maps": maps}
+
+    def _fetch_backup_manifest(self) -> list[dict] | None:
+        """The raw backup-map manifest from Dreame's cloud, or None.
+
+        PropBackupMapInfo does not carry the manifest inline. Its value is
+        the cloud object *name* of the newest backup-manifest file - on a
+        bare-object-name firmware the value is the path directly, on the MIoT
+        route it arrives wrapped as ``{"object_name": ...}``. Either way the
+        manifest body is that file, downloaded through the file-bridge
+        (the same getDownloadUrl the phone app's recovery screen calls).
+        """
+        if self._protocol is None:
+            return None
+        ids = self.profile.prop_id("CleanMap", "PropBackupMapInfo")
+        if ids is None:
+            return None
+        try:
+            result = self._protocol.cloud.get_properties(f"{ids[0]}.{ids[1]}")
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Backup map manifest read failed: %s", err)
+            return None
+
+        if not (isinstance(result, list) and result and result[0].get("value")):
+            return None
+
+        value = result[0]["value"]
+        object_name = value if isinstance(value, str) else ""
+        try:
+            parsed = json.loads(object_name)
+            if isinstance(parsed, dict) and isinstance(parsed.get("object_name"), str):
+                object_name = parsed["object_name"]
+        except (TypeError, ValueError):
+            pass
+
+        if not object_name:
+            return None
+
+        try:
+            url = self._protocol.cloud.get_interim_file_url(object_name)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Backup map manifest URL fetch failed: %s", err)
+            return None
+
+        if not isinstance(url, str) or not url:
+            return None
+
+        try:
+            resp = requests.get(url, timeout=25)
+            resp.raise_for_status()
+            manifest = resp.json()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Backup map manifest download failed: %s", err)
+            return None
+
+        return manifest if isinstance(manifest, list) else None
+
+    async def async_backup_map_document(self, map_id: int, time: int, scale: int = 5) -> dict | None:
+        """Render one historical backup map as a document.
+
+        Each manifest entry also carries a ``thb`` field - the map frame
+        itself as url-safe base64 of a zlib-compressed blob, in the exact
+        layout `decode_frame` already reads (map_id, frame_id, frame_type='I',
+        robot/charger pose, grid_size, width/height, then the grid and a JSON
+        trailer). It is not a thumbnail image; it *is* the backup map, so a
+        backup renders through the same `map.js` component as the live map.
+        """
+        return await self.hass.async_add_executor_job(self._backup_map_blocking, map_id, time, scale)
+
+    def _backup_map_blocking(self, map_id: int, time: int, scale: int) -> dict | None:
+        manifest = self._fetch_backup_manifest()
+        if not manifest:
+            return None
+        for entry in manifest:
+            try:
+                entry_id = int(entry.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if entry_id != map_id:
+                continue
+            for info in entry.get("info") or []:
+                if not isinstance(info, dict) or int(info.get("time", -1)) != time:
+                    continue
+                thb = info.get("thb")
+                if not isinstance(thb, str) or not thb:
+                    continue
+                # Backup frames are stored unencrypted - no comma-suffixed AES
+                # key, so no IV is needed (matches decode_room_names' rism path).
+                frame = decode_frame(thb)
+                if frame is None:
+                    _LOGGER.debug("Backup %s/%s did not decode", map_id, time)
+                    return None
+                room_names = decode_room_names(frame.get("trailer") or {})
+                return map_document(frame, scale, room_names=room_names)
+        return None
 
     async def async_request_map(self) -> bool:
         """Ask for a full map frame.

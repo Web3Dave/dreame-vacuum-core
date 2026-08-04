@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
+from .backup_map_view import DreameBackupMapView
 from .classify_registry import ensure_registry, get_registry
 from .const import CONF_MODEL, DOMAIN
 from .coordinator import DreameCoordinator
@@ -70,6 +71,7 @@ async def _async_serve_frontend(hass: HomeAssistant) -> None:
     )
     hass.http.register_view(DreameMapView(hass))
     hass.http.register_view(DreameMapsView(hass))
+    hass.http.register_view(DreameBackupMapView(hass))
     hass.http.register_view(DreameSnapshotView())
 
     # Loads the card on every dashboard without a manual resource entry.
