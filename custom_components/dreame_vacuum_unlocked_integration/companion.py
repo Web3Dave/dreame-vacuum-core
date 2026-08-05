@@ -305,3 +305,25 @@ class CompanionClient:
                 return await resp.read()
         except (aiohttp.ClientError, TimeoutError):
             return None
+
+    async def async_fetch_pack(self) -> bytes | None:
+        """Fetch the built custom voice pack (upload.tar.gz) from the add-on.
+
+        The add-on builds the pack from the user's uploaded clips; we pull it
+        over HTTP and place it under HA's config/www so the vacuum can download
+        it from the /local URL.
+        """
+        try:
+            async with self._session.get(
+                f"{self._base}/api/audio/pack",
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.read()
+        except (aiohttp.ClientError, TimeoutError) as err:
+            if not self._warned:
+                _LOGGER.warning("Could not fetch voice pack from add-on: %s", err)
+                self._warned = True
+            return None

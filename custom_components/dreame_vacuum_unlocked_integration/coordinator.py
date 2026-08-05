@@ -2062,44 +2062,61 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ],
         )
 
-    def _ensure_custom_voice_pack(self) -> tuple[str, int] | None:
-        """Make sure the pack file the robot will fetch exists under config/www.
+    def _custom_voice_pack_path(self):
+        return self.hass.config.path(
+            "www", "dreame_vacuum_unlocked", "audio", "upload.tar.gz"
+        )
 
-        The device downloads the pack itself from the URL, so the file must be
-        served by Home Assistant at /local/. For now we place an empty
-        gzip(tar) at config/www/dreame_vacuum_unlocked/audio/upload.tar.gz so
-        that URL resolves; returns (md5, size) of whatever is on disk.
+    def _write_custom_voice_pack(self, data: bytes) -> tuple[str, int] | None:
+        """Write the pack bytes under config/www so the /local URL resolves.
+
+        Returns (md5, size) of what was written, or None on failure.
         """
-        import gzip
         import hashlib
         import os
 
         try:
-            path = self.hass.config.path(
-                "www", "dreame_vacuum_unlocked", "audio", "upload.tar.gz"
-            )
-            if not os.path.exists(path):
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                with gzip.open(path, "wb") as fh:
-                    fh.write(b"")
-            with open(path, "rb") as fh:
-                data = fh.read()
+            path = self._custom_voice_pack_path()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(data)
             return hashlib.md5(data).hexdigest(), len(data)
         except Exception as err:  # noqa: BLE001 - best effort, never fail the apply
             _LOGGER.warning("Could not write custom voice pack under www: %s", err)
             return None
 
+    async def _sync_custom_voice_pack(self) -> tuple[str, int] | None:
+        """Pull the built pack from the add-on and put it under config/www.
+
+        The add-on builds the pack (upload.tar.gz) from the user's uploaded
+        clips; we fetch it over HTTP and place it where the vacuum can download
+        it (/local URL). If the add-on hasn't built one yet, we fall back to an
+        empty gzip so the URL still resolves.
+        """
+        import gzip
+
+        data = None
+        if self.companion is not None:
+            try:
+                data = await self.companion.async_fetch_pack()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Could not fetch voice pack from add-on: %s", err)
+                data = None
+        if not data:
+            data = gzip.compress(b"")  # empty fallback so the URL is fetchable
+        return await self.hass.async_add_executor_job(self._write_custom_voice_pack, data)
+
     async def async_set_custom_voice(self, url: str, md5: str = "", size: int = 0) -> bool:
         """Install a custom voice pack (id 'CU') on the robot.
 
         The device downloads the pack itself from `url` (which it must be able
-        to reach over the internet), verifies md5, and switches to it. The app
-        does the same when switching voice packs (PropSetVoice -> switchVoicePack).
-        If md5/size are not supplied we compute them from the pack file we
-        place under config/www.
+        to reach over the internet), verifies md5, and switches to it (the app
+        does the same - PropSetVoice -> switchVoicePack). The pack file is
+        synced from the add-on into config/www first, so md5/size always match
+        the file the robot actually downloads.
         """
-        checksum = await self.hass.async_add_executor_job(self._ensure_custom_voice_pack)
-        if checksum and not md5:
+        checksum = await self._sync_custom_voice_pack()
+        if checksum:
             md5, size = checksum
         payload = json.dumps(
             {"id": "CU", "url": url, "md5": md5 or "", "size": int(size or 0)},
