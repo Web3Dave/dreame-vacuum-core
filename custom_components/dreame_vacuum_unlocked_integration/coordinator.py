@@ -1327,7 +1327,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         meta = map_metadata(frame, scale)
-        document = map_document(frame, scale)
+        document = map_document(
+            frame, scale, room_names=decode_room_names(frame.get("trailer") or {})
+        )
         await run.step(
             f"rendered {len(png)} bytes, {len(document['grid'])} of grid, uploading"
         )
