@@ -25,7 +25,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SNAPSHOT_API_PATH = "/api/dreame_vacuum_unlocked_integration/snapshot/{tag}/{filename}"
 
-SNAPSHOT_ROOT = "/media/dreame-capture/snapshots"
+SNAPSHOT_ROOT = "/media/dreame_vacuum_unlocked/snapshots"
 
 
 def _safe_component(value: str) -> str:
