@@ -2062,6 +2062,19 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ],
         )
 
+    async def async_set_custom_voice(self, url: str, md5: str = "", size: int = 0) -> bool:
+        """Install a custom voice pack (id 'CU') on the robot.
+
+        The device downloads the pack itself from `url` (which it must be able
+        to reach over the internet), verifies md5, and switches to it. The app
+        does the same when switching voice packs (PropSetVoice -> switchVoicePack).
+        """
+        payload = json.dumps(
+            {"id": "CU", "url": url, "md5": md5 or "", "size": int(size or 0)},
+            separators=(",", ":"),
+        )
+        return await self.async_set("Audio", "PropSetVoice", payload)
+
     # -- companion --------------------------------------------------------
     async def async_register_with_companion(self) -> None:
         """Push our device identity so the add-on's UI knows what's ours."""

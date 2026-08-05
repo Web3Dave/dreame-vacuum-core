@@ -202,6 +202,11 @@ ATTR_TAG = "tag"
 ATTR_ROOMS = "rooms"
 ATTR_TIMES = "times"
 
+SERVICE_SET_CUSTOM_VOICE = "set_custom_voice"
+ATTR_URL = "url"
+ATTR_MD5 = "md5"
+ATTR_SIZE = "size"
+
 
 def _device_state_name(value) -> str | None:
     """Name the state where we know it, otherwise pass the number through."""
@@ -277,6 +282,15 @@ async def async_setup_entry(
         {vol.Optional(ATTR_SCALE, default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=12))},
         "async_publish_map",
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        SERVICE_SET_CUSTOM_VOICE,
+        {
+            vol.Required(ATTR_URL): cv.string,
+            vol.Optional(ATTR_MD5, default=""): cv.string,
+            vol.Optional(ATTR_SIZE, default=0): vol.Coerce(int),
+        },
+        "async_set_custom_voice",
     )
     platform.async_register_entity_service(
         SERVICE_GO_TO_POINT,
@@ -542,3 +556,10 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
 
     async def async_publish_map(self, scale: int = 5) -> dict:
         return await self.coordinator.async_publish_map(scale)
+
+    async def async_set_custom_voice(self, url: str, md5: str = "", size: int = 0) -> bool:
+        """Tell the robot where to download a custom voice pack (id 'CU').
+
+        The device fetches the pack itself over the internet and installs it.
+        """
+        return await self.coordinator.async_set_custom_voice(url, md5, size)

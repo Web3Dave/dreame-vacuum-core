@@ -404,3 +404,39 @@ publish_map:
         number:
           min: 1
           max: 12
+
+set_custom_voice:
+  name: Set custom voice
+  description: >-
+    Install a custom voice pack (id "CU") on the vacuum by telling it where to
+    download the pack. The device fetches the pack itself over the internet,
+    verifies md5, and switches to it, then playSound plays your custom audio.
+  target:
+    entity:
+      integration: dreame_vacuum_unlocked_integration
+      domain: vacuum
+  fields:
+    url:
+      name: URL
+      description: Public URL of the gzipped tar voice pack the vacuum can reach.
+      required: true
+      example: https://example.com/custom_pack.tar.gz
+      selector:
+        text:
+    md5:
+      name: MD5
+      description: MD5 hash of the pack file, used by the device to verify it.
+      required: false
+      default: ""
+      selector:
+        text:
+    size:
+      name: Size
+      description: Byte size of the pack file.
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          mode: box
+
