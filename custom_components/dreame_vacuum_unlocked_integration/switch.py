@@ -35,7 +35,7 @@ async def async_setup_entry(
     coordinator: DreameCoordinator = hass.data[DOMAIN][entry.entry_id]
     if not coordinator.companion:
         return  # needs the add-on
-    async_add_entities([DreameStreamSwitch(coordinator)])
+    async_add_entities([DreameStreamSwitch(coordinator), DreameSpeakSwitch(coordinator)])
 
 
 class DreameStreamSwitch(DreameEntity, SwitchEntity):
@@ -114,5 +114,80 @@ class DreameStreamSwitch(DreameEntity, SwitchEntity):
             # finds the stream still running, with nothing in the log.
             _LOGGER.warning(
                 "Could not stop the stream for %s - the add-on did not confirm it",
+                self.coordinator.device_name,
+            )
+
+
+class DreameSpeakSwitch(DreameEntity, SwitchEntity):
+    """Explicit start/stop for the talk-back (intercom) audio channel,
+    independent of any particular clip. Turning it on arms intercom and opens
+    the p2p send channel (requires an active monitor/video session on the
+    device, same as the Stream switch and the app's own tap-to-talk); leaving
+    it on lets `play_audio_clip` push multiple clips without re-arming
+    intercom between each one. Turning it off closes the channel again."""
+
+    _attr_name = "Intercom"
+    _attr_icon = "mdi:microphone"
+    _attr_should_poll = True
+
+    def __init__(self, coordinator: DreameCoordinator) -> None:
+        super().__init__(coordinator, "speak")
+        self._running: bool | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        await self.async_update()
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        return self._running is not None
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._running)
+
+    async def async_update(self) -> None:
+        self._running = await self.coordinator.companion.async_speak_status(
+            self.coordinator.did
+        )
+
+    async def async_turn_on(self, **kwargs) -> None:
+        c = self.coordinator
+        cfg = c.config
+
+        _LOGGER.info("Intercom switch: arming talk-back for %s", c.device_name)
+
+        missing = [k for k in (CONF_USERNAME, CONF_PASSWORD) if not cfg.get(k)]
+        if missing:
+            _LOGGER.error(
+                "Cannot arm the intercom for %s: the config entry has no %s. "
+                "Re-add the integration to restore it",
+                c.device_name,
+                " or ".join(missing),
+            )
+            return
+
+        ok = await c.companion.async_speak_start(
+            cfg[CONF_USERNAME],
+            cfg[CONF_PASSWORD],
+            cfg.get(CONF_COUNTRY, "eu"),
+            cfg.get(CONF_CAMERA_PIN, ""),
+            c.did,
+        )
+        if ok:
+            self._running = True
+            self.async_write_ha_state()
+        else:
+            _LOGGER.warning("Could not arm the intercom for %s", c.device_name)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        _LOGGER.info("Intercom switch: closing talk-back for %s", self.coordinator.device_name)
+        if await self.coordinator.companion.async_speak_stop(self.coordinator.did):
+            self._running = False
+            self.async_write_ha_state()
+        else:
+            _LOGGER.warning(
+                "Could not stop the intercom for %s - the add-on did not confirm it",
                 self.coordinator.device_name,
             )

@@ -2124,6 +2124,60 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         return await self.async_set("Audio", "PropSetVoice", payload)
 
+    async def async_play_audio_clip(self, filename: str) -> bool:
+        """Push one uploaded clip (see the add-on's Audio page) through the
+        vacuum's speaker: opens the talk-back channel if it isn't already
+        open, sends the clip, and closes the channel again - but only if
+        this call is the one that opened it. Leaves an Intercom switch that
+        was already on alone, same as inspect_point does for the Stream
+        switch."""
+        if not self.companion:
+            raise HomeAssistantError(
+                f"{self.device_name} has no companion add-on configured, "
+                "which is where audio clips are stored and streamed from"
+            )
+
+        run, owns = await self._async_begin_run(f"play_audio_clip:{filename}")
+
+        async def refuse(summary: str, detail: str) -> HomeAssistantError:
+            await self._async_end_run(run, owns, False, summary, {"error": detail})
+            return HomeAssistantError(detail)
+
+        cfg = self.config
+        started_here = False
+        already_running = await self.companion.async_speak_status(self.did)
+        if not already_running:
+            missing = [k for k in (CONF_USERNAME, CONF_PASSWORD) if not cfg.get(k)]
+            if missing:
+                raise await refuse(
+                    "Missing credentials",
+                    f"Cannot arm the intercom for {self.device_name}: the config entry has no "
+                    + " or ".join(missing),
+                )
+            await run.step("arming intercom")
+            if not await self.companion.async_speak_start(
+                cfg[CONF_USERNAME], cfg[CONF_PASSWORD],
+                cfg.get(CONF_COUNTRY, "eu"), cfg.get(CONF_CAMERA_PIN, ""), self.did,
+            ):
+                raise await refuse(
+                    "Could not arm intercom", f"Could not arm the intercom for {self.device_name}"
+                )
+            started_here = True
+        else:
+            await run.step("intercom already armed, reusing it")
+
+        await run.step(f"sending {filename}")
+        sent = await self.companion.async_speak_send(self.did, filename)
+
+        if started_here:
+            await self.companion.async_speak_stop(self.did)
+
+        if not sent:
+            raise await refuse("Send failed", f"Could not push '{filename}' to {self.device_name}'s speaker")
+
+        await self._async_end_run(run, owns, True, f"Played {filename}", {})
+        return True
+
     # -- companion --------------------------------------------------------
     async def async_register_with_companion(self) -> None:
         """Push our device identity so the add-on's UI knows what's ours."""

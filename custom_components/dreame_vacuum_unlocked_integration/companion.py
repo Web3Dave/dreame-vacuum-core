@@ -164,6 +164,59 @@ class CompanionClient:
                 self._warned = True
             return None
 
+    async def async_speak_start(
+        self, username: str, password: str, country: str, pin: str, did: str
+    ) -> bool:
+        """Open a persistent talk-back session (intercom armed, p2p send
+        channel open) so multiple clips can be pushed with async_speak_send
+        without re-arming intercom between each one. Mirrors
+        async_stream_start's shape."""
+        result = await self._post(
+            "/speak/start",
+            {
+                "username": username,
+                "password": password,
+                "country": country,
+                "four_digit_code": pin,
+                "did": did,
+            },
+        )
+        return bool(result and result.get("success"))
+
+    async def async_speak_send(self, did: str, filename: str) -> bool:
+        """Push one clip already uploaded to the add-on's audio library
+        through an already-open talk-back session. Fails if none is open -
+        call async_speak_start first."""
+        result = await self._post("/speak/send", {"did": did, "filename": filename}, timeout=120)
+        return bool(result and result.get("success"))
+
+    async def async_speak_stop(self, did: str) -> bool:
+        result = await self._post("/speak/stop", {"did": did})
+        return bool(result and result.get("success"))
+
+    async def async_speak_status(self, did: str) -> bool | None:
+        """True/False if known, None if the add-on couldn't be reached."""
+        try:
+            async with self._session.get(
+                f"{self._base}/speak/status",
+                params={"did": did},
+                headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.warning(
+                        "Companion add-on returned HTTP %s for /speak/status", resp.status
+                    )
+                    return None
+                self._warned = False
+                body = await resp.json()
+                return bool(body.get("running"))
+        except (aiohttp.ClientError, TimeoutError) as err:
+            if not self._warned:
+                _LOGGER.warning("Companion add-on unreachable at %s: %s", self._base, err)
+                self._warned = True
+            return None
+
     async def async_task_calls(self, slug: str) -> dict | None:
         """A task expanded into service calls, or None if unreachable.
 

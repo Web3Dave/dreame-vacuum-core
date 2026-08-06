@@ -440,3 +440,23 @@ set_custom_voice:
           min: 0
           mode: box
 
+play_audio_clip:
+  name: Play audio clip
+  description: >-
+    Push one clip from the add-on's Audio page through the vacuum's speaker
+    right now, over the same talk-back (intercom) channel the app's
+    tap-to-talk uses. Opens the channel if it isn't already open (the
+    Intercom switch) and closes it again afterwards unless it was already on.
+  target:
+    entity:
+      integration: dreame_vacuum_unlocked_integration
+      domain: vacuum
+  fields:
+    filename:
+      name: Filename
+      description: The uploaded clip's file name, exactly as shown on the Audio page.
+      required: true
+      example: doorbell.mp3
+      selector:
+        text:
+

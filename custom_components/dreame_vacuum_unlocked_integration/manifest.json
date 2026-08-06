@@ -1,7 +1,7 @@
 {
   "domain": "dreame_vacuum_unlocked_integration",
   "name": "Dreame Vacuum Unlocked Integration",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "documentation": "https://github.com/Web3Dave/dreame-vacuum-unlocked-integration",
   "issue_tracker": "https://github.com/Web3Dave/dreame-vacuum-unlocked-integration/issues",
   "codeowners": ["@Web3Dave"],

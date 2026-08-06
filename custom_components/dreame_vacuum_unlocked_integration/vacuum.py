@@ -207,6 +207,8 @@ ATTR_URL = "url"
 ATTR_MD5 = "md5"
 ATTR_SIZE = "size"
 
+SERVICE_PLAY_AUDIO_CLIP = "play_audio_clip"
+
 
 def _device_state_name(value) -> str | None:
     """Name the state where we know it, otherwise pass the number through."""
@@ -291,6 +293,11 @@ async def async_setup_entry(
             vol.Optional(ATTR_SIZE, default=0): vol.Coerce(int),
         },
         "async_set_custom_voice",
+    )
+    platform.async_register_entity_service(
+        SERVICE_PLAY_AUDIO_CLIP,
+        {vol.Required(ATTR_FILENAME): cv.string},
+        "async_play_audio_clip",
     )
     platform.async_register_entity_service(
         SERVICE_GO_TO_POINT,
@@ -563,3 +570,6 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         The device fetches the pack itself over the internet and installs it.
         """
         return await self.coordinator.async_set_custom_voice(url, md5, size)
+
+    async def async_play_audio_clip(self, filename: str) -> bool:
+        return await self.coordinator.async_play_audio_clip(filename)
