@@ -1394,6 +1394,34 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._publish_task_state()
         await run.step(f"{definition.get('name', task)}: {len(calls)} steps")
 
+        # The task owns the camera stream for its whole run: snapshots come off
+        # the live feed, clips record it, and turns stay silent. Open it (with
+        # the mic armed so clips capture sound by default) before the first
+        # step and close it afterwards - unless a stream was already running,
+        # in which case we reuse it and leave it alone.
+        started_stream = False
+        try:
+            if not await self.companion.async_stream_status(self.did):
+                await run.step("starting the camera stream")
+                creds = (
+                    self.config[CONF_USERNAME], self.config[CONF_PASSWORD],
+                    self.config.get(CONF_COUNTRY, "eu"),
+                    self.config.get(CONF_CAMERA_PIN, ""),
+                )
+                url = await self.companion.async_stream_start(*creds, self.did)
+                started_stream = bool(url)
+                if started_stream:
+                    await self.companion.async_stream_intercom(self.did, True)
+                    await run.step("stream open (audio on)")
+                else:
+                    await run.step("stream would not start - clips may be silent")
+        except Exception as err:  # noqa: BLE001 - reported, then re-raised
+            await self._async_end_run(
+                run, owns, False, "Could not start the stream",
+                {"error": str(err)},
+            )
+            raise HomeAssistantError(f"Task '{task}' could not open a stream: {err}") from err
+
         try:
             for index, call in enumerate(calls, start=1):
                 domain, _, service = call["action"].partition(".")
@@ -1414,8 +1442,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 run, owns, False, f"Failed at step {index} of {len(calls)}",
                 {"error": str(err)},
             )
+            if started_stream:
+                await self.companion.async_stream_stop(self.did)
             raise HomeAssistantError(f"Task '{task}' failed at step {index}: {err}") from err
 
+        if started_stream:
+            await self.companion.async_stream_stop(self.did)
+            await run.step("stream closed")
         await self._async_end_run(
             run, owns, True, f"Completed {len(calls)} steps", {}
         )
@@ -1523,15 +1556,14 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(f"Could not take a photo of {self.device_name}")
         return shot
 
-    async def async_record_clip(
-        self, tag: str | None = None, audio: bool = False
-    ) -> dict:
+    async def async_record_clip(self, tag: str | None = None) -> dict:
         """Begin recording the running stream into a clip, to be ended later.
 
         The `end_clip` service (async_end_clip) stops the recording and saves
-        it as an h264 mp4 under `tag`. Recording rides the already-running
-        stream, so a task must have started one first. No classifier runs on
-        a clip - the classifier is for photos.
+        it as an h264 mp4 under `tag`, with sound (the task keeps the mic
+        armed, so the clip carries audio). Recording rides the stream the
+        task runner opens around the whole task. No classifier runs on a clip
+        - the classifier is for photos.
         """
         if not self.companion:
             raise HomeAssistantError(
@@ -1544,15 +1576,15 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not streaming:
             await self._async_end_run(
                 run, owns, False, "No stream",
-                {"error": f"No stream is running on {self.device_name} - add a "
-                          "start_stream step before the record_clip step"},
+                {"error": f"No stream is running on {self.device_name} - the "
+                          "task should have opened one automatically"},
             )
             raise HomeAssistantError(
-                f"No stream is running on {self.device_name} - a record_clip "
-                "step needs a start_stream step before it"
+                f"No stream is running on {self.device_name}, so there is "
+                "nothing to record - check the stream started at task run"
             )
-        await run.step(f"recording to tag '{safe_tag}'" + (" with audio" if audio else ""))
-        result = await self.companion.async_record_start(self.did, safe_tag, audio)
+        await run.step(f"recording to tag '{safe_tag}' (with audio)")
+        result = await self.companion.async_record_start(self.did, safe_tag)
         if not result or not result.get("success"):
             detail = (result or {}).get("error") or "the add-on would not start a recording"
             await self._async_end_run(
@@ -1562,7 +1594,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_end_run(
             run, owns, True, f"Recording to '{safe_tag}'", {}
         )
-        return {"tag": safe_tag, "audio": audio}
+        return {"tag": safe_tag}
 
     async def async_end_clip(self) -> dict:
         """Stop the in-flight clip recording and save it under its tag."""

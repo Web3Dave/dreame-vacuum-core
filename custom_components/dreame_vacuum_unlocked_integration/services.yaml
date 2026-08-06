@@ -388,10 +388,10 @@ clean_rooms:
 record_clip:
   name: Record a clip
   description: >-
-    Begin recording the vacuum's running camera stream into a video clip, saved
-    as an h264 mp4 under the given tag when the end_clip service runs. Needs a
-    stream already open (a start_stream step). Clips are never run through the
-    classifier - that is for photos only.
+    Begin recording the vacuum's camera stream into a video clip with sound,
+    saved as an h264 mp4 under the given tag when the end_clip service runs.
+    The task runner keeps the stream open for the whole task. Clips are never
+    run through the classifier - that is for photos only.
   target:
     entity:
       integration: dreame_vacuum_unlocked_integration
@@ -405,14 +405,6 @@ record_clip:
       default: general
       selector:
         text:
-    audio:
-      name: Record audio
-      description: >-
-        Also record the vacuum's mic into the clip. Needs the stream to carry
-        sound - start it with the start_stream audio option enabled.
-      default: false
-      selector:
-        boolean:
 
 end_clip:
   name: End a clip

@@ -307,7 +307,6 @@ async def async_setup_entry(
         SERVICE_RECORD_CLIP,
         {
             vol.Optional(ATTR_TAG): cv.string,
-            vol.Optional(ATTR_AUDIO, default=False): cv.boolean,
         },
         "async_record_clip",
         supports_response=SupportsResponse.OPTIONAL,
@@ -574,8 +573,8 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
     ) -> dict:
         return await self.coordinator.async_take_snapshot(tag, filename)
 
-    async def async_record_clip(self, tag: str | None = None, audio: bool = False) -> dict:
-        return await self.coordinator.async_record_clip(tag, audio)
+    async def async_record_clip(self, tag: str | None = None) -> dict:
+        return await self.coordinator.async_record_clip(tag)
 
     async def async_end_clip(self) -> dict:
         return await self.coordinator.async_end_clip()

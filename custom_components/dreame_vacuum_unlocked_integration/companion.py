@@ -182,14 +182,15 @@ class CompanionClient:
                 self._warned = True
             return None
 
-    async def async_record_start(self, did: str, tag: str | None = None, audio: bool = False) -> dict | None:
+    async def async_record_start(self, did: str, tag: str | None = None) -> dict | None:
         """Begin a clip recording of the running stream in the add-on.
 
-        Returns {\"success\": bool, \"tag\": str, ...} or None if unreachable.
-        The recording is closed later by `async_record_stop`.
+        Audio is recorded by default. Returns {\"success\": bool, \"tag\": str, ...}
+        or None if unreachable. The recording is closed later by
+        `async_record_stop`.
         """
         return await self._post(
-            "/record/start", {"did": did, "tag": tag or None, "audio": audio}
+            "/record/start", {"did": did, "tag": tag or None}
         )
 
     async def async_record_stop(self, did: str) -> dict | None:
