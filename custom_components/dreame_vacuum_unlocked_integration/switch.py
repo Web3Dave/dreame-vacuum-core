@@ -124,7 +124,13 @@ class DreameSpeakSwitch(DreameEntity, SwitchEntity):
     the p2p send channel (requires an active monitor/video session on the
     device, same as the Stream switch and the app's own tap-to-talk); leaving
     it on lets `play_audio_clip` push multiple clips without re-arming
-    intercom between each one. Turning it off closes the channel again."""
+    intercom between each one. Turning it off closes the channel again.
+
+    Because intercom holds the vacuum's mic open, turning it on ALSO pulls
+    the vacuum's live mic audio and muxes it (with the video) into the {did}
+    RTSP the HA camera widget can point at - so you get sound while intercom
+    is on. This uses the same single camera session as the Stream switch, so
+    turning Intercom on stops any plain (video-only) stream first."""
 
     _attr_name = "Intercom"
     _attr_icon = "mdi:microphone"
@@ -133,6 +139,7 @@ class DreameSpeakSwitch(DreameEntity, SwitchEntity):
     def __init__(self, coordinator: DreameCoordinator) -> None:
         super().__init__(coordinator, "speak")
         self._running: bool | None = None
+        self._rtsp_url: str | None = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -147,10 +154,18 @@ class DreameSpeakSwitch(DreameEntity, SwitchEntity):
     def is_on(self) -> bool:
         return bool(self._running)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        return {"rtsp_url": self._rtsp_url}
+
     async def async_update(self) -> None:
-        self._running = await self.coordinator.companion.async_speak_status(
+        st = await self.coordinator.companion.async_speak_status(
             self.coordinator.did
         )
+        if st is None:
+            return
+        self._running = bool(st.get("running"))
+        self._rtsp_url = st.get("rtsp_url")
 
     async def async_turn_on(self, **kwargs) -> None:
         c = self.coordinator
@@ -168,15 +183,25 @@ class DreameSpeakSwitch(DreameEntity, SwitchEntity):
             )
             return
 
-        ok = await c.companion.async_speak_start(
+        # Intercom needs the single camera session - drop any plain stream first.
+        if await c.companion.async_stream_status(c.did):
+            _LOGGER.info(
+                "Intercom switch: stopping video-only stream for %s first",
+                c.device_name,
+            )
+            await c.companion.async_stream_stop(c.did)
+
+        res = await c.companion.async_speak_start(
             cfg[CONF_USERNAME],
             cfg[CONF_PASSWORD],
             cfg.get(CONF_COUNTRY, "eu"),
             cfg.get(CONF_CAMERA_PIN, ""),
             c.did,
+            rtsp=True,
         )
-        if ok:
+        if res and res.get("success"):
             self._running = True
+            self._rtsp_url = res.get("rtsp_url")
             self.async_write_ha_state()
         else:
             _LOGGER.warning("Could not arm the intercom for %s", c.device_name)
@@ -185,6 +210,7 @@ class DreameSpeakSwitch(DreameEntity, SwitchEntity):
         _LOGGER.info("Intercom switch: closing talk-back for %s", self.coordinator.device_name)
         if await self.coordinator.companion.async_speak_stop(self.coordinator.did):
             self._running = False
+            self._rtsp_url = None
             self.async_write_ha_state()
         else:
             _LOGGER.warning(

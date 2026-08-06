@@ -165,12 +165,16 @@ class CompanionClient:
             return None
 
     async def async_speak_start(
-        self, username: str, password: str, country: str, pin: str, did: str
-    ) -> bool:
+        self, username: str, password: str, country: str, pin: str, did: str,
+        rtsp: bool = False,
+    ) -> dict | None:
         """Open a persistent talk-back session (intercom armed, p2p send
         channel open) so multiple clips can be pushed with async_speak_send
         without re-arming intercom between each one. Mirrors
-        async_stream_start's shape."""
+        async_stream_start's shape.
+
+        Returns {"success": bool, "rtsp_url": str|None} (rtsp_url is the
+        video + vacuum-mic RTSP when `rtsp` is True), or None on failure."""
         result = await self._post(
             "/speak/start",
             {
@@ -179,9 +183,12 @@ class CompanionClient:
                 "country": country,
                 "four_digit_code": pin,
                 "did": did,
+                "rtsp": rtsp,
             },
         )
-        return bool(result and result.get("success"))
+        if not result or not result.get("success"):
+            return None
+        return {"success": True, "rtsp_url": result.get("rtsp_url")}
 
     async def async_speak_send(self, did: str, filename: str) -> bool:
         """Push one clip already uploaded to the add-on's audio library
@@ -194,8 +201,8 @@ class CompanionClient:
         result = await self._post("/speak/stop", {"did": did})
         return bool(result and result.get("success"))
 
-    async def async_speak_status(self, did: str) -> bool | None:
-        """True/False if known, None if the add-on couldn't be reached."""
+    async def async_speak_status(self, did: str) -> dict | None:
+        """{"running": bool, "rtsp_url": str|None}; None if unreachable."""
         try:
             async with self._session.get(
                 f"{self._base}/speak/status",
@@ -210,7 +217,10 @@ class CompanionClient:
                     return None
                 self._warned = False
                 body = await resp.json()
-                return bool(body.get("running"))
+                return {
+                    "running": bool(body.get("running")),
+                    "rtsp_url": body.get("rtsp_url"),
+                }
         except (aiohttp.ClientError, TimeoutError) as err:
             if not self._warned:
                 _LOGGER.warning("Companion add-on unreachable at %s: %s", self._base, err)
