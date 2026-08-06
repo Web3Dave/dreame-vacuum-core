@@ -128,6 +128,24 @@ class CompanionClient:
         result = await self._post("/stream/stop", {"did": did})
         return bool(result and result.get("success"))
 
+    async def async_stream_intercom(self, did: str, on: bool) -> bool | None:
+        """Arm/disarm the vacuum-mic (intercom) layer on a RUNNING stream.
+
+        on=True arms the mic (audio flows into the stream's RTSP + talk
+        enabled); on=False disarms it. The video stream keeps running either
+        way. Returns True/False if known, None if the add-on couldn't be
+        reached or no stream is running."""
+        result = await self._post("/stream/intercom", {"did": did, "on": on})
+        if result is None:
+            return None
+        if not result.get("success"):
+            return result.get("intercom_armed", False)
+        return bool(result.get("intercom_armed", on))
+
+    async def async_stream_intercom_state(self, did: str) -> bool | None:
+        state = await self.async_stream_state(did)
+        return None if state is None else bool(state.get("intercom_armed"))
+
     async def async_stream_status(self, did: str) -> bool | None:
         """True/False if known, None if the add-on couldn't be reached."""
         state = await self.async_stream_state(did)

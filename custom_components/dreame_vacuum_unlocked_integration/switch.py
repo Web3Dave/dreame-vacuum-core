@@ -119,18 +119,14 @@ class DreameStreamSwitch(DreameEntity, SwitchEntity):
 
 
 class DreameSpeakSwitch(DreameEntity, SwitchEntity):
-    """Explicit start/stop for the talk-back (intercom) audio channel,
-    independent of any particular clip. Turning it on arms intercom and opens
-    the p2p send channel (requires an active monitor/video session on the
-    device, same as the Stream switch and the app's own tap-to-talk); leaving
-    it on lets `play_audio_clip` push multiple clips without re-arming
-    intercom between each one. Turning it off closes the channel again.
+    """The vacuum-mic (intercom) audio layer on a RUNNING stream.
 
-    Because intercom holds the vacuum's mic open, turning it on ALSO pulls
-    the vacuum's live mic audio and muxes it (with the video) into the {did}
-    RTSP the HA camera widget can point at - so you get sound while intercom
-    is on. This uses the same single camera session as the Stream switch, so
-    turning Intercom on stops any plain (video-only) stream first."""
+    This is the audio-out toggle: turning it on ensures the video stream is
+    running (starts it if not), then arms the vacuum's mic so its live mic
+    audio flows into the stream's RTSP and `play_audio_clip` (talk) is
+    enabled. Turning it off disarms the mic (audio leaves the RTSP, talk
+    disabled) but the video stream KEEPS running - mirroring the app's camera
+    view where tap-to-talk is a separate control on top of the live feed."""
 
     _attr_name = "Intercom"
     _attr_icon = "mdi:microphone"
@@ -159,19 +155,19 @@ class DreameSpeakSwitch(DreameEntity, SwitchEntity):
         return {"rtsp_url": self._rtsp_url}
 
     async def async_update(self) -> None:
-        st = await self.coordinator.companion.async_speak_status(
+        state = await self.coordinator.companion.async_stream_state(
             self.coordinator.did
         )
-        if st is None:
+        if state is None:
             return
-        self._running = bool(st.get("running"))
-        self._rtsp_url = st.get("rtsp_url")
+        self._running = bool(state.get("intercom_armed"))
+        self._rtsp_url = state.get("rtsp_url")
 
     async def async_turn_on(self, **kwargs) -> None:
         c = self.coordinator
         cfg = c.config
 
-        _LOGGER.info("Intercom switch: arming talk-back for %s", c.device_name)
+        _LOGGER.info("Intercom switch: arming vacuum mic for %s", c.device_name)
 
         missing = [k for k in (CONF_USERNAME, CONF_PASSWORD) if not cfg.get(k)]
         if missing:
@@ -183,37 +179,32 @@ class DreameSpeakSwitch(DreameEntity, SwitchEntity):
             )
             return
 
-        # Intercom needs the single camera session - drop any plain stream first.
-        if await c.companion.async_stream_status(c.did):
+        # Intercom is a layer on the video stream - make sure the stream is up
+        # first (auto-start video per the user's model).
+        running = await c.companion.async_stream_status(c.did)
+        if not running:
             _LOGGER.info(
-                "Intercom switch: stopping video-only stream for %s first",
+                "Intercom switch: starting video stream for %s first",
                 c.device_name,
             )
-            await c.companion.async_stream_stop(c.did)
+            self._rtsp_url = await c.companion.async_stream_start(
+                cfg[CONF_USERNAME],
+                cfg[CONF_PASSWORD],
+                cfg.get(CONF_COUNTRY, "eu"),
+                cfg.get(CONF_CAMERA_PIN, ""),
+                c.did,
+            )
 
-        res = await c.companion.async_speak_start(
-            cfg[CONF_USERNAME],
-            cfg[CONF_PASSWORD],
-            cfg.get(CONF_COUNTRY, "eu"),
-            cfg.get(CONF_CAMERA_PIN, ""),
-            c.did,
-            rtsp=True,
-        )
-        if res and res.get("success"):
-            self._running = True
-            self._rtsp_url = res.get("rtsp_url")
-            self.async_write_ha_state()
-        else:
+        armed = await c.companion.async_stream_intercom(c.did, True)
+        if armed is None:
             _LOGGER.warning("Could not arm the intercom for %s", c.device_name)
+            return
+        self._running = True
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
-        _LOGGER.info("Intercom switch: closing talk-back for %s", self.coordinator.device_name)
-        if await self.coordinator.companion.async_speak_stop(self.coordinator.did):
-            self._running = False
-            self._rtsp_url = None
-            self.async_write_ha_state()
-        else:
-            _LOGGER.warning(
-                "Could not stop the intercom for %s - the add-on did not confirm it",
-                self.coordinator.device_name,
-            )
+        _LOGGER.info("Intercom switch: disarming vacuum mic for %s", self.coordinator.device_name)
+        # Only remove the audio layer - the video stream keeps running.
+        await self.coordinator.companion.async_stream_intercom(self.coordinator.did, False)
+        self._running = False
+        self.async_write_ha_state()
