@@ -385,6 +385,46 @@ clean_rooms:
           min: 1
           max: 5
 
+record_clip:
+  name: Record a clip
+  description: >-
+    Begin recording the vacuum's running camera stream into a video clip, saved
+    as an h264 mp4 under the given tag when the end_clip service runs. Needs a
+    stream already open (a start_stream step). Clips are never run through the
+    classifier - that is for photos only.
+  target:
+    entity:
+      integration: dreame_vacuum_unlocked_integration
+      domain: vacuum
+  fields:
+    tag:
+      name: Tag
+      description: >-
+        Groups clips alongside snapshots in the media folder, for example
+        poop_check. Saved as snapshots/<tag>/<timestamp>.mp4 when the clip ends.
+      default: general
+      selector:
+        text:
+    audio:
+      name: Record audio
+      description: >-
+        Also record the vacuum's mic into the clip. Needs the stream to carry
+        sound - start it with the start_stream audio option enabled.
+      default: false
+      selector:
+        boolean:
+
+end_clip:
+  name: End a clip
+  description: >-
+    Stop the recording started by a record_clip step and save it as an h264
+    mp4 under that step's tag. A clip must have a matching record_clip before
+    it.
+  target:
+    entity:
+      integration: dreame_vacuum_unlocked_integration
+      domain: vacuum
+
 publish_map:
   name: Publish the map
   description: >-

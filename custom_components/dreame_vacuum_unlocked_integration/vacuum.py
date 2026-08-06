@@ -209,6 +209,10 @@ ATTR_SIZE = "size"
 
 SERVICE_PLAY_AUDIO_CLIP = "play_audio_clip"
 
+SERVICE_RECORD_CLIP = "record_clip"
+SERVICE_END_CLIP = "end_clip"
+ATTR_AUDIO = "audio"
+
 
 def _device_state_name(value) -> str | None:
     """Name the state where we know it, otherwise pass the number through."""
@@ -298,6 +302,21 @@ async def async_setup_entry(
         SERVICE_PLAY_AUDIO_CLIP,
         {vol.Required(ATTR_FILENAME): cv.string},
         "async_play_audio_clip",
+    )
+    platform.async_register_entity_service(
+        SERVICE_RECORD_CLIP,
+        {
+            vol.Optional(ATTR_TAG): cv.string,
+            vol.Optional(ATTR_AUDIO, default=False): cv.boolean,
+        },
+        "async_record_clip",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    platform.async_register_entity_service(
+        SERVICE_END_CLIP,
+        {},
+        "async_end_clip",
+        supports_response=SupportsResponse.OPTIONAL,
     )
     platform.async_register_entity_service(
         SERVICE_GO_TO_POINT,
@@ -554,6 +573,12 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
         self, tag: str | None = None, filename: str | None = None
     ) -> dict:
         return await self.coordinator.async_take_snapshot(tag, filename)
+
+    async def async_record_clip(self, tag: str | None = None, audio: bool = False) -> dict:
+        return await self.coordinator.async_record_clip(tag, audio)
+
+    async def async_end_clip(self) -> dict:
+        return await self.coordinator.async_end_clip()
 
     async def async_start_task(self, task: str) -> dict:
         return await self.coordinator.async_start_task(task)

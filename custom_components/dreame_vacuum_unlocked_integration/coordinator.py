@@ -1523,6 +1523,73 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(f"Could not take a photo of {self.device_name}")
         return shot
 
+    async def async_record_clip(
+        self, tag: str | None = None, audio: bool = False
+    ) -> dict:
+        """Begin recording the running stream into a clip, to be ended later.
+
+        The `end_clip` service (async_end_clip) stops the recording and saves
+        it as an h264 mp4 under `tag`. Recording rides the already-running
+        stream, so a task must have started one first. No classifier runs on
+        a clip - the classifier is for photos.
+        """
+        if not self.companion:
+            raise HomeAssistantError(
+                f"{self.device_name} has no companion add-on configured, "
+                "which is needed to record a clip"
+            )
+        run, owns = await self._async_begin_run("record_clip")
+        safe_tag = tag or "general"
+        streaming = await self.companion.async_stream_status(self.did)
+        if not streaming:
+            await self._async_end_run(
+                run, owns, False, "No stream",
+                {"error": f"No stream is running on {self.device_name} - add a "
+                          "start_stream step before the record_clip step"},
+            )
+            raise HomeAssistantError(
+                f"No stream is running on {self.device_name} - a record_clip "
+                "step needs a start_stream step before it"
+            )
+        await run.step(f"recording to tag '{safe_tag}'" + (" with audio" if audio else ""))
+        result = await self.companion.async_record_start(self.did, safe_tag, audio)
+        if not result or not result.get("success"):
+            detail = (result or {}).get("error") or "the add-on would not start a recording"
+            await self._async_end_run(
+                run, owns, False, "Could not start recording", {"error": detail}
+            )
+            raise HomeAssistantError(detail)
+        await self._async_end_run(
+            run, owns, True, f"Recording to '{safe_tag}'", {}
+        )
+        return {"tag": safe_tag, "audio": audio}
+
+    async def async_end_clip(self) -> dict:
+        """Stop the in-flight clip recording and save it under its tag."""
+        if not self.companion:
+            raise HomeAssistantError(
+                f"{self.device_name} has no companion add-on configured, "
+                "which is needed to save a clip"
+            )
+        run, owns = await self._async_begin_run("end_clip")
+        result = await self.companion.async_record_stop(self.did)
+        if not result or not result.get("success"):
+            detail = (result or {}).get("error") or "the add-on had no recording to end"
+            await self._async_end_run(
+                run, owns, False, "Could not end clip", {"error": detail}
+            )
+            raise HomeAssistantError(detail)
+        await run.step(f"saved to {result.get('media_path', result.get('filename'))}")
+        await self._async_end_run(
+            run, owns, True, f"Clip saved to {result.get('media_path')}", result
+        )
+        return {
+            "filename": result.get("filename"),
+            "media_path": result.get("media_path"),
+            "tag": result.get("tag"),
+            "seconds": result.get("seconds"),
+        }
+
     async def _async_capture_to(
         self, filename: str | None, creds: tuple, tag: str | None = None,
         run: RunReporter | None = None,

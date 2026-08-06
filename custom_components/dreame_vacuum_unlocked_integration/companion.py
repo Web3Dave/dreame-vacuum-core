@@ -182,6 +182,38 @@ class CompanionClient:
                 self._warned = True
             return None
 
+    async def async_record_start(self, did: str, tag: str | None = None, audio: bool = False) -> dict | None:
+        """Begin a clip recording of the running stream in the add-on.
+
+        Returns {\"success\": bool, \"tag\": str, ...} or None if unreachable.
+        The recording is closed later by `async_record_stop`.
+        """
+        return await self._post(
+            "/record/start", {"did": did, "tag": tag or None, "audio": audio}
+        )
+
+    async def async_record_stop(self, did: str) -> dict | None:
+        """End the clip recording for this did and save it under its tag.
+
+        Returns {\"success\": bool, \"media_path\": str, \"filename\": str,...}
+        or None if the add-on couldn't be reached.
+        """
+        return await self._post("/record/stop", {"did": did}, timeout=30)
+
+    async def async_record_status(self, did: str) -> dict | None:
+        """{\"running\": bool, \"tag\": str|None, \"audio\": bool}; None if unreachable."""
+        try:
+            async with self._session.get(
+                f"{self._base}/record/status",
+                params={"did": did}, headers=self._headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.json()
+        except (aiohttp.ClientError, TimeoutError):
+            return None
+
     async def async_speak_start(
         self, username: str, password: str, country: str, pin: str, did: str,
         rtsp: bool = False,
