@@ -2309,7 +2309,13 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cfg = self.config
         started_here = False
         already_running = await self.companion.async_speak_status(self.did)
-        if not already_running:
+        # async_speak_status returns a dict ({"running": bool, ...}) - a
+        # non-empty dict is always truthy, so a bare `if not already_running:`
+        # would ALWAYS pick the "reuse" branch and never arm the audio stream
+        # /speak/send needs, failing every playback with "No active intercom".
+        # Check the flag it actually reports.
+        speak_running = bool(already_running and already_running.get("running"))
+        if not speak_running:
             missing = [k for k in (CONF_USERNAME, CONF_PASSWORD) if not cfg.get(k)]
             if missing:
                 raise await refuse(
