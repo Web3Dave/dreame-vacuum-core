@@ -1270,25 +1270,46 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.value("VacuumExtend", "PropWorkMode"),
         )
 
-    async def _async_wait_until_docked(self, timeout: float = 300.0) -> None:
-        """Block until the robot is physically back on its base (charging).
+    async def _async_wait_until_docked(
+        self, timeout: float = 500.0, dock_tolerance: int = 500
+    ) -> None:
+        """Block until the robot is physically back on its base.
 
         Battery.StartCharge (what vacuum.return_to_base sends) is accepted
         immediately and the robot then travels home; the task runner waits for
         each service call, so without this a following step (e.g. end_clip) ran
-        before the robot reached the dock and cut the clip mid-return. PropVacuumStatus
-        reports "back home" (3) while still travelling, so only "charging" (6) -
-        contact with the dock - counts as arrived. Times out, because a robot
-        that cannot find its base would otherwise hang the caller forever.
+        before the robot reached the dock and cut the clip mid-return.
+
+        Status alone is not a reliable "docked" signal here: while a task holds
+        the camera stream/session open the firmware keeps the robot in remote
+        control (status 13), so it never flips to `charging` (6) even once it is
+        parked. We therefore treat the robot as docked when EITHER the status is
+        charging (6) OR its live pose is parked on the dock (within
+        `dock_tolerance` mm of the charger position). Times out (500s - furniture
+        can make the return slow) because a robot that cannot find its base must
+        not hang the caller forever.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            await self.async_request_refresh()
+            await self.hass.async_add_executor_job(self._read_map_frame)
             status = self.value("Vacuum", "PropVacuumStatus")
             if status == STATUS_DOCKED:
-                _LOGGER.info("%s is back on its base", self.device_name)
+                _LOGGER.info("%s is back on its base (status charging)", self.device_name)
                 await self._async_step("docked")
                 return
+            pos = self.position or {}
+            cx, cy, px, py = (pos.get("charger_x"), pos.get("charger_y"),
+                              pos.get("x"), pos.get("y"))
+            if cx is not None and cy is not None and px is not None and py is not None:
+                distance = math.hypot(px - cx, py - cy)
+                if distance <= dock_tolerance:
+                    _LOGGER.info(
+                        "%s is parked on its base at (%s, %s), %dmm from charger "
+                        "(status %s)",
+                        self.device_name, px, py, distance, status,
+                    )
+                    await self._async_step("docked")
+                    return
             await asyncio.sleep(3)
         raise HomeAssistantError(
             f"{self.device_name} did not return to its base within {int(timeout)}s "
@@ -1572,9 +1593,16 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             await self._async_run_calls(calls, run)
         except Exception as err:  # noqa: BLE001 - reported, then re-raised
+            # A step failed mid-task; if a clip is still recording (the end_clip
+            # step was never reached) finalise and save it so the footage is not
+            # lost as a stray .part file - and so the next task is not blocked
+            # by an already-recording clip.
+            saved = await self._async_save_open_clip()
+            detail = {"error": str(err)}
+            if saved and saved.get("media_path"):
+                detail["saved_clip"] = str(saved.get("media_path"))
             await self._async_end_run(
-                run, owns, False, f"Failed: {err}",
-                {"error": str(err)},
+                run, owns, False, f"Failed: {err}", detail,
             )
             if started_stream:
                 await self.companion.async_stream_stop(self.did)
@@ -1583,6 +1611,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if started_stream:
             await self.companion.async_stream_stop(self.did)
             await run.step("stream closed")
+        # Defensive: if a recording somehow outlived the end_clip step, save it
+        # rather than leave a dangling recorder that blocks the next task.
+        await self._async_save_open_clip()
         await self._async_end_run(
             run, owns, True, f"Completed {len(calls)} steps", {}
         )
@@ -1832,6 +1863,36 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "tag": result.get("tag"),
             "seconds": result.get("seconds"),
         }
+
+    async def _async_save_open_clip(self) -> dict | None:
+        """Finalise and save a clip still recording when a task ends early.
+
+        If a step fails before the task's `end_clip` step runs, the recording
+        the task started would otherwise be left as an abandoned .part file -
+        losing the footage, and blocking the next task's record_clip with
+        'Already recording'. So fail gracefully: stop and save whatever was
+        captured. Best-effort - never masks the original failure.
+        """
+        if not self.companion:
+            return None
+        try:
+            status = await self.companion.async_record_status(self.did)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not check clip status to save it: %s", err)
+            return None
+        if not (status and status.get("running")):
+            return None
+        try:
+            saved = await self.async_end_clip()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning(
+                "Could not save the open clip after the task ended early: %s", err
+            )
+            return None
+        _LOGGER.info(
+            "Saved in-progress clip after the task ended: %s", saved.get("media_path")
+        )
+        return saved
 
     async def _async_capture_to(
         self, filename: str | None, creds: tuple, tag: str | None = None,
