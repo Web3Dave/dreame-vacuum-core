@@ -1423,28 +1423,15 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(f"Task '{task}' could not open a stream: {err}") from err
 
         try:
-            for index, call in enumerate(calls, start=1):
-                domain, _, service = call["action"].partition(".")
-                data = call.get("data") or {}
-                if self.active_task:
-                    self.active_task.step = index
-                    self.active_task.detail = call["action"]
-                    self._publish_task_state()
-                await run.step(
-                    f"step {index}/{len(calls)}: {call['action']}"
-                    + (f" {data}" if data else "")
-                )
-                await self.hass.services.async_call(
-                    domain, service, {**data, **call.get("target", {})}, blocking=True
-                )
+            await self._async_run_calls(calls, run)
         except Exception as err:  # noqa: BLE001 - reported, then re-raised
             await self._async_end_run(
-                run, owns, False, f"Failed at step {index} of {len(calls)}",
+                run, owns, False, f"Failed: {err}",
                 {"error": str(err)},
             )
             if started_stream:
                 await self.companion.async_stream_stop(self.did)
-            raise HomeAssistantError(f"Task '{task}' failed at step {index}: {err}") from err
+            raise HomeAssistantError(f"Task '{task}' failed: {err}") from err
 
         if started_stream:
             await self.companion.async_stream_stop(self.did)
@@ -1453,6 +1440,83 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             run, owns, True, f"Completed {len(calls)} steps", {}
         )
         return {"task": task, "steps": len(calls)}
+
+    async def _async_run_calls(self, calls: list[dict], run: RunReporter) -> None:
+        """Run a (possibly nested) list of task calls in order.
+
+        A leaf is one service call. A branch node is the task's
+        If-classification step: read the classifier's current result from its
+        HA state entity, run the first matching case, else the default. The
+        branch is evaluated at that point in the sequence, so the task only
+        needs a snapshot step (on a tag this classifier is linked to) before
+        it - that snapshot already updated the result entity inline.
+        """
+        for index, call in enumerate(calls, start=1):
+            if call.get("branch"):
+                await run.step(f"step {index}: if classification '{call['classifier']}'")
+                if self.active_task:
+                    self.active_task.detail = (
+                        f"if classification '{call['classifier']}'"
+                    )
+                    self._publish_task_state()
+                chosen = await self._async_pick_branch(call)
+                await run.step(
+                    f"  -> {chosen['label']}: {len(chosen['calls'])} step(s)"
+                )
+                await self._async_run_calls(chosen["calls"], run)
+                continue
+
+            domain, _, service = call["action"].partition(".")
+            data = call.get("data") or {}
+            if self.active_task:
+                self.active_task.step = index
+                self.active_task.detail = call["action"]
+                self._publish_task_state()
+            await run.step(
+                f"step {index}/{len(calls)}: {call['action']}"
+                + (f" {data}" if data else "")
+            )
+            await self.hass.services.async_call(
+                domain, service, {**data, **call.get("target", {})}, blocking=True
+            )
+
+    async def _async_pick_branch(self, node: dict) -> dict:
+        """Which branch to run, given the classifier's latest result.
+
+        The result label is compared against the classifier's *classes*, which
+        are also the case labels in the task step, so an exact string match is
+        the whole rule. A classifier that has never produced a result (or whose
+        entity is unavailable) falls through to the default branch.
+        """
+        label = await self._async_classifier_result(node["classifier"])
+        if label is not None and label in node["cases"]:
+            return {"label": label, "calls": node["cases"][label]}
+        if node.get("default"):
+            return {"label": "default", "calls": node["default"]}
+        return {"label": "none", "calls": []}
+
+    async def _async_classifier_result(self, classifier_id: str) -> str | None:
+        """The classification state entity's current value - its winning label."""
+        entity_id = await self._async_classifier_entity(classifier_id)
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        value = state.state if state else None
+        return value if value not in (None, "", "unknown", "unavailable") else None
+
+    async def _async_classifier_entity(self, classifier_id: str) -> str | None:
+        """Resolve a classifier's result sensor from its stable unique_id.
+
+        The entity registry is the only thing that knows the real entity_id -
+        it is HA-derived from the classifier's name and can be renamed by the
+        user, so it must never be guessed.
+        """
+        registry = er.async_get(self.hass)
+        uid = f"dreame_classify_{classifier_id}"
+        for entry in er.async_entries_for_config_entry(registry, self.entry.entry_id):
+            if entry.unique_id == uid and entry.entity_id.startswith("sensor."):
+                return entry.entity_id
+        return None
 
     def _publish_task_state(self) -> None:
         """Push the live task state out to the entity attributes."""
