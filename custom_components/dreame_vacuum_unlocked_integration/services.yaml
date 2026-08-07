@@ -54,9 +54,8 @@ rotate_to_heading:
         Seconds to wait after each nudge before measuring. The robot turns at
         its own pace, so this is a safety floor - the settle itself reads the
         live pose and returns the moment the turn visibly stops. Scaled up
-        automatically for larger turns. Lower it once logs confirm pushes are
-        arriving reliably during a turn.
-      default: 4
+        automatically for larger turns.
+      default: 1.5
       selector:
         number:
           min: 0

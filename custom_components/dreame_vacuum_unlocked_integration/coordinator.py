@@ -1954,7 +1954,7 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         tolerance: float = 1.0,
         max_attempts: int = 10,
         damping: float = 0.85,
-        settle: float = 4.0,
+        settle: float = 1.5,
         quiet: bool = True,
         camera_settle: float | None = None,
         use_camera_session: bool = True,
