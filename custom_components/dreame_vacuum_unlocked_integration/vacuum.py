@@ -492,6 +492,10 @@ class DreameVacuum(DreameEntity, StateVacuumEntity):
 
     async def async_return_to_base(self, **kwargs) -> None:
         await self.coordinator.async_action("Battery", "StartCharge")
+        # StartCharge is accepted immediately; wait for the robot to actually
+        # reach the dock, so a caller (e.g. a task's end_clip step) only runs
+        # once the return has physically finished rather than cutting it short.
+        await self.coordinator._async_wait_until_docked()
 
     async def async_locate(self, **kwargs) -> None:
         await self.coordinator.async_action("Audio", "position")

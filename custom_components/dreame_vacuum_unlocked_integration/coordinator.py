@@ -122,6 +122,11 @@ QUIET_PROPERTIES = (
 # is still on its way. Values mirror vacuum.py's status constants.
 TASK_ENDED_MODES = {0, 6, 14, 17}
 
+# PropVacuumStatus value meaning the robot is back on its base and charging -
+# the signal that a return_to_dock has physically finished (the robot reports
+# "back home" (3) while still travelling, so that is NOT a docked state).
+STATUS_DOCKED = 6
+
 # Properties we try to read every cycle, expressed in vocabulary terms so the
 # numeric ids come from the generated profile rather than being hardcoded.
 # The robot pushes map frames several times a second while it moves. This is
@@ -1263,6 +1268,31 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "%s still reports work_mode %s after being told to stop; rotating anyway",
             self.device_name,
             self.value("VacuumExtend", "PropWorkMode"),
+        )
+
+    async def _async_wait_until_docked(self, timeout: float = 300.0) -> None:
+        """Block until the robot is physically back on its base (charging).
+
+        Battery.StartCharge (what vacuum.return_to_base sends) is accepted
+        immediately and the robot then travels home; the task runner waits for
+        each service call, so without this a following step (e.g. end_clip) ran
+        before the robot reached the dock and cut the clip mid-return. PropVacuumStatus
+        reports "back home" (3) while still travelling, so only "charging" (6) -
+        contact with the dock - counts as arrived. Times out, because a robot
+        that cannot find its base would otherwise hang the caller forever.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            await self.async_request_refresh()
+            status = self.value("Vacuum", "PropVacuumStatus")
+            if status == STATUS_DOCKED:
+                _LOGGER.info("%s is back on its base", self.device_name)
+                await self._async_step("docked")
+                return
+            await asyncio.sleep(3)
+        raise HomeAssistantError(
+            f"{self.device_name} did not return to its base within {int(timeout)}s "
+            f"(status {self.value('Vacuum', 'PropVacuumStatus')})"
         )
 
     async def async_inspect_point(
