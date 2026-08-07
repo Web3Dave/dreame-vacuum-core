@@ -38,9 +38,10 @@ rotate_to_heading:
     damping:
       name: Damping
       description: >-
-        Fraction of the remaining error to correct each step. Each step costs
-        the better part of a minute waiting for the heading to settle, so
-        higher is faster; too high oscillates around the target.
+        Fraction of the remaining error to correct each step. The heading is
+        now measured from the live pushed pose, so each step settles as soon
+        as the robot stops turning rather than waiting out a fixed poll;
+        higher is faster, too high oscillates around the target.
       default: 0.85
       selector:
         number:
@@ -51,8 +52,10 @@ rotate_to_heading:
       name: Settle time
       description: >-
         Seconds to wait after each nudge before measuring. The robot turns at
-        its own pace, so measuring too early reads a heading it has already
-        left. Scaled up automatically for larger turns.
+        its own pace, so this is a safety floor - the settle itself reads the
+        live pose and returns the moment the turn visibly stops. Scaled up
+        automatically for larger turns. Lower it once logs confirm pushes are
+        arriving reliably during a turn.
       default: 4
       selector:
         number:

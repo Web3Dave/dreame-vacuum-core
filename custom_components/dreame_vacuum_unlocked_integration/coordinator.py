@@ -281,6 +281,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # frames arrive by push on their own schedule, not from the poll.
         self.position: dict | None = None
         self._position_at: float | None = None
+        # When the live pushed pose last advanced. `_absorb_map_frame` updates
+        # self.position from MQTT pushes while the robot moves, so this is the
+        # "the robot is actually moving now" signal the rotate/settle loop can
+        # key off instead of forcing its own (slow) map reads.
+        self._last_push_at: float = 0.0
         self._pose_notified_at: float = 0.0
         self._map_ids = self.profile.prop_id("CleanMap", "PropMapdata")
 
@@ -465,7 +470,9 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if position is None:
             return False
         self.position = position
-        self._position_at = time.monotonic()
+        now = time.monotonic()
+        self._position_at = now
+        self._last_push_at = now
         self._last_change = time.time()
         # Kept so a dashboard card can be served the full map without asking
         # the device for another frame - this one is as fresh as it gets.
@@ -731,47 +738,157 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return None
 
     async def async_settled_heading(
-        self, timeout: float = 45.0, tolerance: float = 2.0
+        self, timeout: float = 45.0, tolerance: float = 2.0,
+        min_floor: float = 0.0, push_wait: float = 2.0, poll: float = 0.15,
     ) -> float | None:
         """Wait until the heading stops changing, then return it.
 
         The first frame after a turn is often captured mid-rotation, so the
         robot is still moving when it is measured - the value then changes
         again seconds later. Correcting against that reading makes the loop
-        chase a robot that has already moved on. Two consecutive frames
-        agreeing means it has actually stopped.
+        chase a robot that has already moved on.
+
+        Push-first: while the robot turns it uploads fresh map frames over MQTT
+        and `_absorb_map_frame` keeps `self.position` current - the same
+        low-latency stream the Dreame app's live marker is rendered from. We
+        read that directly instead of forcing a ``mapReq`` + cloud re-download
+        on every poll, so a turn is measured as soon as it visibly settles
+        rather than on the next slow poll. Two *distinct* fresh frames agreeing
+        means the robot has actually stopped.
+
+        Fallbacks, in order: if the pose goes quiet (robot stopped, pushes
+        cease) we return the last pushed heading; if no fresh push arrives at
+        all (a device that doesn't push while turning) we fall back to the old
+        forced-read path, so nothing regresses on firmware that stays quiet.
+        `min_floor` is a safety lower bound so we never "settle" on a frame
+        from before the nudge took effect.
         """
-        deadline = time.monotonic() + timeout
+        start = time.monotonic()
+        floor_deadline = start + min_floor
+        deadline = start + timeout
         previous: float | None = None
         first: float | None = None
         reads = 0
+        # (frame_id, angle) of the distinct fresh frames seen since we started
+        # waiting. Keyed to frame_id so we count genuinely-new poses, not the
+        # same frame repeatedly.
+        history: list[tuple[int, float]] = []
+        # Only trust frames that advance past the pose in hand when we started
+        # waiting - the pre-nudge heading must never count as a "fresh" reading,
+        # or a device that doesn't push while turning would be measured as
+        # unmoved instead of falling back to a forced read.
+        before_fid = None
+        if self.position is not None:
+            before_fid = self.position.get("frame_id")
+        last_new_at = time.monotonic()
+
         while time.monotonic() < deadline:
-            reading = await self.async_refresh_position(
-                timeout=max(5.0, deadline - time.monotonic())
-            )
-            if reading is None:
-                return previous
-            reads += 1
-            if previous is not None:
-                drift = ((reading - previous + 180) % 360) - 180
-                if abs(drift) <= tolerance:
-                    # Reported so the value of this check is measurable: if the
-                    # first two frames always agree, the second is redundant
-                    # and a single frame would halve the time a turn costs.
+            now = time.monotonic()
+            pos = self.position
+            fid = (pos or {}).get("frame_id")
+            angle = (pos or {}).get("angle")
+            floor_elapsed = now >= floor_deadline
+
+            if fid is not None and angle is not None and fid != before_fid and (
+                not history or fid != history[-1][0]
+            ):
+                # A new distinct frame. This is the fast, low-latency path.
+                history.append((fid, angle))
+                history = history[-3:]
+                reads += 1
+                last_new_at = now
+                if previous is not None and first is not None:
+                    drift = ((angle - previous + 180) % 360) - 180
+                    if abs(drift) > tolerance:
+                        # Mid-turn: the robot is still sweeping through. Keep
+                        # reading, don't even check the floor yet.
+                        _LOGGER.debug(
+                            "settle %s: frame %s -> %s deg, still turning "
+                            "(%.1f deg/frame)",
+                            self.device_name, history[-2][0], fid, drift,
+                        )
+                    # Two distinct fresh frames agreeing = it stopped turning.
+                    elif len(history) >= 2 and floor_elapsed:
+                        elapsed = time.monotonic() - start
+                        _LOGGER.info(
+                            "settle %s: OK after %.2fs, %d frames, final frame "
+                            "%s at %.1f deg (first %.1f, tolerance %.1f) "
+                            "[push-settled]",
+                            self.device_name, elapsed, reads, fid, angle,
+                            first, tolerance,
+                        )
+                        await self._async_step(
+                            f"  settled after {reads} frames"
+                            + (f" (first read {first:.0f}\u00b0, final {angle:.0f}\u00b0)"
+                               if abs(((angle - first + 180) % 360) - 180) > tolerance
+                               else "")
+                        )
+                        return angle
+                else:
+                    first = angle
+                previous = angle
+                continue
+
+            if floor_elapsed and (now - last_new_at) > push_wait:
+                # Pushes have gone quiet with a fresh reading already in hand:
+                # the robot finished turning and stopped uploading. The last
+                # pushed angle IS the settled heading.
+                if history:
+                    _, last_angle = history[-1]
+                    elapsed = time.monotonic() - start
+                    _LOGGER.info(
+                        "settle %s: OK after %.2fs on push silence (rate %.2f "
+                        "s/frame), final %.1f deg [push-silent]",
+                        self.device_name, elapsed,
+                        (last_new_at - start) / max(1, len(history)), last_angle,
+                    )
                     await self._async_step(
-                        f"  settled after {reads} frames"
-                        + (f" (first read {first:.0f}\u00b0, final {reading:.0f}\u00b0)"
-                           if first is not None and abs(
-                               ((reading - first + 180) % 360) - 180) > tolerance
-                           else "")
+                        f"  settled after {reads} frames (first read {first:.0f}\u00b0, "
+                        f"final {last_angle:.0f}\u00b0)"
+                    )
+                    return last_angle
+                # No fresh reading ever arrived - robots that don't push while
+                # turning. Fall through to a forced read (old path).
+                _LOGGER.info(
+                    "settle %s: no fresh push within %.1fs, using forced read "
+                    "(%.1fs elapsed)",
+                    self.device_name, push_wait, time.monotonic() - start,
+                )
+                reading = await self.async_refresh_position(
+                    timeout=max(5.0, deadline - time.monotonic())
+                )
+                if reading is None:
+                    _LOGGER.info(
+                        "settle %s: forced read returned nothing after %.1fs",
+                        self.device_name, time.monotonic() - start,
+                    )
+                    return previous
+                reads += 1
+                old = previous
+                previous = reading
+                if first is None:
+                    first = reading
+                    last_new_at = time.monotonic()
+                    continue
+                if old is None:
+                    last_new_at = time.monotonic()
+                    continue
+                drift = ((reading - old + 180) % 360) - 180
+                if abs(drift) <= tolerance:
+                    await self._async_step(
+                        f"  settled after {reads} frames (first read {first:.0f}\u00b0, "
+                        f"final {reading:.0f}\u00b0)"
                     )
                     return reading
-                await self._async_step(
-                    f"  still turning: {previous:.0f}\u00b0 -> {reading:.0f}\u00b0"
-                )
-            else:
-                first = reading
-            previous = reading
+                last_new_at = time.monotonic()
+                continue
+
+            await asyncio.sleep(poll)
+
+        _LOGGER.info(
+            "settle %s: gave up waiting after %.1fs (read %d fresh frames)",
+            self.device_name, time.monotonic() - start, reads,
+        )
         return previous
 
     def position_diagnosis(self) -> str:
@@ -1857,12 +1974,21 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         run, owns = await self._async_begin_run("rotate_to_heading")
         if owns:
             await run.step(f"target {heading:.0f}\u00b0, within {tolerance:.0f}\u00b0")
+        rotate_started = time.monotonic()
 
         # Lenient for the opening read: it only needs to know roughly where the
         # robot is pointing. Insisting on a brand new frame here fails before
         # anything has moved, because a stationary robot may not have uploaded
         # one for a long time.
+        t0 = time.monotonic()
         current = await self.async_refresh_position(max_age=180)
+        open_ms = (time.monotonic() - t0) * 1000
+        _LOGGER.info(
+            "rotate %s -> %.0f deg: opening read %.0f ms (pose age %.1fs, "
+            "start %.1f deg)",
+            self.device_name, heading, open_ms, self.position_age(),
+            current if current is not None else float("nan"),
+        )
         if current is None:
             message = (
                 f"Could not read {self.device_name}'s heading. "
@@ -1911,6 +2037,11 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if camera:
                 await self.hass.async_add_executor_job(camera.stop)
             final = (self.position or {}).get("angle")
+            total_ms = (time.monotonic() - rotate_started) * 1000
+            _LOGGER.info(
+                "rotate %s done in %.0f ms, final heading %s deg, success=%s",
+                self.device_name, total_ms, final, failure is None,
+            )
             await self._async_end_run(
                 run, owns, failure is None,
                 f"Facing {final}\u00b0" if failure is None else "Heading not reached",
@@ -2008,16 +2139,22 @@ class DreameCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise HomeAssistantError(f"{self.device_name} rejected the rotation command")
 
             # The nudge is accepted immediately but the robot turns at its own
-            # pace. Measuring straight away reads a pose from part-way through
-            # the turn, so the next correction is computed against a heading
-            # the robot has already left - it chases itself and burns every
-            # attempt. Wait longer for bigger turns.
-            await asyncio.sleep(min(settle + abs(step) * 0.15, 20.0))
-
-            # Strict, and waits for the robot to stop: this is the measurement
-            # the next correction depends on, so it has to reflect where the
-            # turn finished rather than a frame from part-way through it.
-            measured = await self.async_settled_heading()
+            # pace. Measure it by watching the live pushed pose settle, in
+            # real time, instead of sleeping a fixed duration and then polling
+            # the cloud for a fresh frame. A small floor keeps us from ever
+            # accepting a frame from before the nudge took effect; the settle
+            # itself returns the instant the turn visibly stops.
+            turn_start = time.monotonic()
+            await asyncio.sleep(min(0.75, 20.0))
+            floor = min(settle + abs(step) * 0.10, 12.0)
+            measured = await self.async_settled_heading(min_floor=floor)
+            measure_ms = (time.monotonic() - turn_start) * 1000
+            _LOGGER.info(
+                "rotate %d/%d %s: commanded %.0f deg, measure phase %.0f ms "
+                "(floor %.1fs), result %s",
+                attempt, max_attempts, self.device_name, step, measure_ms, floor,
+                f"{measured:.1f} deg" if measured is not None else "None",
+            )
             if measured is None:
                 trace.append(f"{attempt}: commanded {step:+.0f}, NO new map frame")
                 raise HomeAssistantError(
